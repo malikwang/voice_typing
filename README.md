@@ -14,9 +14,30 @@ Ubuntu 环境下的 AI 语音转文字工具，支持阿里云 Paraformer 和本
 
 ## 安装
 
+### 方式一：使用 deb 包安装（推荐）
+
+下载并安装 deb 包：
+
 ```bash
-cd /home/admin123/Development/voice_typing
+# 从 GitHub Releases 下载最新版本
+wget https://github.com/hongyan199048/voice_typing/releases/download/v1.0.0/voice-typing_1.0.0_amd64.deb
+
+# 安装
+sudo dpkg -i voice-typing_1.0.0_amd64.deb
+
+# 如果有依赖问题，运行：
+sudo apt-get install -f
+```
+
+安装后可直接从应用菜单启动，或命令行运行 `voice-typing`
+
+### 方式二：从源码安装
+
+```bash
+git clone https://github.com/hongyan199048/voice_typing.git
+cd voice_typing
 pip install -r requirements.txt
+python main.py
 ```
 
 ## 使用
@@ -41,12 +62,30 @@ python main.py
 
 ## 国内用户加速
 
-如果 Hugging Face 下载慢，设置镜像：
+### 方案一：使用 Hugging Face 镜像（推荐）
+
+faster-whisper 模型托管在 Hugging Face，国内访问较慢。可使用国内镜像加速：
 
 ```bash
 export HF_ENDPOINT=https://hf-mirror.com
 python main.py
 ```
+
+### 方案二：手动下载模型
+
+如果镜像仍然无法访问，可手动下载模型：
+
+1. 通过 VPN 访问 Hugging Face 下载模型文件
+2. 模型地址：https://huggingface.co/guillaumekln/faster-whisper-large-v2
+3. 下载后放置到：`~/.cache/voice_typing/models/`
+4. 或使用阿里云 Paraformer 引擎（无需下载模型，仅需 API Key）
+
+### 方案三：使用阿里云引擎（无需 VPN）
+
+推荐国内用户直接使用阿里云 Paraformer 引擎：
+- 无需下载大模型文件
+- 识别速度快，准确率高
+- 申请 DashScope API Key：https://dashscope.console.aliyun.com/
 
 ## 依赖
 
