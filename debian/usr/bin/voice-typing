@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+import sys
+import os
+
+# 添加应用目录到 Python 路径
+sys.path.insert(0, '/usr/share/voice-typing')
+
+# 切换到应用目录
+os.chdir('/usr/share/voice-typing')
+
+# 导入并运行主程序
+from main import main
+main()

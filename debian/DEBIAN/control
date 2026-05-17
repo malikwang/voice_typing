@@ -1,0 +1,16 @@
+Package: voice-typing
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Depends: python3 (>= 3.8), python3-pyqt5, python3-pyaudio, xclip, xdotool
+Maintainer: hongyan199048 <hongyan199048@example.com>
+Description: 实时语音转文字桌面应用
+ VoiceType 是一个基于 PyQt5 的语音转文字桌面应用。
+ .
+ 功能特性：
+  - 支持阿里云 Paraformer 和 faster-whisper 本地引擎
+  - 全局快捷键 (Ctrl+Alt+S) 控制录音
+  - 实时浮窗显示录音状态和识别结果
+  - 自动粘贴识别结果到光标处
+  - 暗黑主题 GUI 设置界面

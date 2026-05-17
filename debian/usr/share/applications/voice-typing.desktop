@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=VoiceType
+Name[zh_CN]=语音转文字
+Comment=Real-time voice to text application
+Comment[zh_CN]=实时语音转文字应用
+Exec=/usr/bin/voice-typing
+Icon=voice-typing
+Terminal=false
+Categories=Utility;AudioVideo;
+Keywords=voice;speech;recognition;transcription;
+StartupNotify=true
