@@ -13,6 +13,7 @@ class ParaformerCallback(RecognitionCallback):
     def __init__(self):
         super().__init__()
         self.final_text = ""
+        self._sentences = []  # 累积所有句子
         self._on_text = None
 
     def set_on_text(self, callback):
@@ -21,7 +22,24 @@ class ParaformerCallback(RecognitionCallback):
     def on_event(self, result):
         sentence = result.get_sentence()
         if sentence and sentence.get("text"):
-            self.final_text = sentence["text"]
+            text = sentence["text"]
+            sentence_id = sentence.get("sentence_id", 0)
+            end_time = sentence.get("end_time")
+            is_final = end_time is not None and end_time > 0  # end_time 存在且 > 0 表示句子结束
+
+            # 使用 sentence_id 去重：只在句子最终确定时添加
+            if is_final:
+                # 检查是否已存在该 sentence_id
+                if not any(sid == sentence_id for sid, _ in self._sentences):
+                    self._sentences.append((sentence_id, text))
+                    self.final_text = "".join(t for _, t in self._sentences)
+            else:
+                # 实时预览（不保存）
+                preview = "".join(t for _, t in self._sentences) + text
+                if self._on_text:
+                    self._on_text(preview)
+                return
+
             if self._on_text:
                 self._on_text(self.final_text)
 
