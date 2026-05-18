@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QLineEdit, QComboBox, QPushButton, QProgressBar,
     QSystemTrayIcon, QMenu, QAction, QApplication, QMessageBox,
+    QListWidget, QListWidgetItem,
 )
 
 from config_manager import load_config, save_config
@@ -89,7 +90,7 @@ class SettingsWindow(QWidget):
 
     def _init_ui(self):
         self.setWindowTitle("VoiceType")
-        self.setFixedSize(480, 620)
+        self.setFixedSize(520, 750)
         self.setWindowIcon(_make_tray_icon())
 
         root = QVBoxLayout(self)
@@ -206,6 +207,40 @@ class SettingsWindow(QWidget):
 
         root.addWidget(hotkey_card)
 
+        # 卡片 4: 自定义词库
+        vocab_card = QGroupBox("自定义词库")
+        vlayout = QVBoxLayout(vocab_card)
+
+        vocab_hint = QLabel("添加常用词汇，纠正识别错误（例如：专业术语、人名等）")
+        vocab_hint.setObjectName("subtitle")
+        vocab_hint.setWordWrap(True)
+        vlayout.addWidget(vocab_hint)
+
+        # 词库列表
+        self._vocab_list = QListWidget()
+        self._vocab_list.setMaximumHeight(120)
+        vlayout.addWidget(self._vocab_list)
+
+        # 添加词汇输入
+        add_row = QHBoxLayout()
+        self._vocab_input = QLineEdit()
+        self._vocab_input.setPlaceholderText("输入词汇（例如：Claude、PyTorch）")
+        add_row.addWidget(self._vocab_input)
+
+        add_vocab_btn = QPushButton("添加")
+        add_vocab_btn.setObjectName("accent")
+        add_vocab_btn.setFixedWidth(80)
+        add_vocab_btn.clicked.connect(self._add_vocabulary)
+        add_row.addWidget(add_vocab_btn)
+        vlayout.addLayout(add_row)
+
+        # 删除按钮
+        del_vocab_btn = QPushButton("删除选中")
+        del_vocab_btn.clicked.connect(self._delete_vocabulary)
+        vlayout.addWidget(del_vocab_btn)
+
+        root.addWidget(vocab_card)
+
         root.addStretch()
 
         # 底部按钮行
@@ -254,7 +289,11 @@ class SettingsWindow(QWidget):
     def _create_engine(self):
         engine_type = self._config["engine"]
         if engine_type == "alibaba":
-            engine = AlibabaEngine(api_key=self._config.get("alibaba_api_key", ""))
+            vocabulary = self._config.get("custom_vocabulary", [])
+            engine = AlibabaEngine(
+                api_key=self._config.get("alibaba_api_key", ""),
+                vocabulary=vocabulary
+            )
             engine.initialize()
         else:
             size = self._config.get("local_model", "base")
@@ -295,6 +334,12 @@ class SettingsWindow(QWidget):
             # 检查模型是否已下载
             self._check_model_status()
 
+        # 自定义词库
+        vocab = self._config.get("custom_vocabulary", [])
+        self._vocab_list.clear()
+        for word in vocab:
+            self._vocab_list.addItem(word)
+
     # ---------- 事件处理 ----------
 
     def _on_engine_preview(self, index):
@@ -326,6 +371,12 @@ class SettingsWindow(QWidget):
         sizes = ["tiny", "base", "small"]
         self._config["local_model"] = sizes[size_index]
 
+        # 保存自定义词库
+        vocab = []
+        for i in range(self._vocab_list.count()):
+            vocab.append(self._vocab_list.item(i).text())
+        self._config["custom_vocabulary"] = vocab
+
         # 保存配置文件
         save_config(self._config)
 
@@ -351,6 +402,34 @@ class SettingsWindow(QWidget):
         else:
             self._api_input.setEchoMode(QLineEdit.Password)
             self._eye_btn.setIcon(_make_eye_icon(visible=True))
+
+    def _add_vocabulary(self):
+        """添加自定义词汇"""
+        word = self._vocab_input.text().strip()
+        if not word:
+            return
+
+        # 检查是否已存在
+        for i in range(self._vocab_list.count()):
+            if self._vocab_list.item(i).text() == word:
+                self._status_label.setText(f"词汇 '{word}' 已存在")
+                QTimer.singleShot(2000, lambda: self._update_status())
+                return
+
+        # 添加到列表
+        self._vocab_list.addItem(word)
+        self._vocab_input.clear()
+        self._status_label.setText(f"已添加词汇 '{word}'（点击确定保存）")
+        QTimer.singleShot(2000, lambda: self._update_status())
+
+    def _delete_vocabulary(self):
+        """删除选中的词汇"""
+        current_item = self._vocab_list.currentItem()
+        if current_item:
+            word = current_item.text()
+            self._vocab_list.takeItem(self._vocab_list.row(current_item))
+            self._status_label.setText(f"已删除词汇 '{word}'（点击确定保存）")
+            QTimer.singleShot(2000, lambda: self._update_status())
 
     def _on_engine_switch(self, index):
         """引擎切换（旧方法，保留用于兼容）"""
