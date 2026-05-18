@@ -16,7 +16,7 @@ Ubuntu 环境下的 AI 语音转文字工具，支持阿里云 Paraformer 和本
 
 ### 方式一：deb 包安装（推荐）
 
-从 [GitHub Releases](https://github.com/hongyan199048/voice_typing/releases/tag/v1.0.0) 下载最新版本：
+从 [GitHub Releases](https://github.com/hongyan199048/voice_typing/releases) 下载最新版本：
 
 ```bash
 wget https://github.com/hongyan199048/voice_typing/releases/download/v1.0.0/voice-typing_1.0.0_amd64.deb
