@@ -12,7 +12,7 @@ DEFAULT_CONFIG = {
     "local_model": "base",
     "hotkey": ["ctrl", "alt", "v"],
     "first_run": True,
-    "custom_vocabulary": [],  # 自定义词库 [{"wrong": "错误词", "correct": "正确词"}]
+    "custom_vocabulary": [],  # 自定义热词列表：["CUDA", "GitHub", "Python"]
 }
 
 

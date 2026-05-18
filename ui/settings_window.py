@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QLineEdit, QComboBox, QPushButton, QProgressBar,
     QSystemTrayIcon, QMenu, QAction, QApplication, QMessageBox,
-    QListWidget, QListWidgetItem,
+    QListWidget, QListWidgetItem, QScrollArea,
 )
 
 from config_manager import load_config, save_config
@@ -19,20 +19,33 @@ from engine.local_engine import LocalEngine, download_model
 
 
 def _make_tray_icon():
-    """生成绿色圆形托盘图标"""
-    pix = QPixmap(32, 32)
-    pix.fill(Qt.transparent)
-    p = QPainter(pix)
-    p.setRenderHint(QPainter.Antialiasing)
-    p.setBrush(QBrush(QColor(34, 197, 94)))
-    p.setPen(Qt.NoPen)
-    p.drawEllipse(4, 4, 24, 24)
-    # 白色麦克风简化符号
-    p.setBrush(QBrush(QColor(13, 13, 13)))
-    p.drawRoundedRect(13, 7, 6, 10, 2, 2)
-    p.drawRoundedRect(11, 14, 10, 3, 1, 1)
-    p.end()
-    return QIcon(pix)
+    """加载麦克风图标作为托盘图标"""
+    import os
+    # 获取图标文件路径（相对于当前文件）
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    icon_path = os.path.join(current_dir, "image", "20260518-213528.jpg")
+
+    # 如果图标文件存在，使用它；否则使用默认绘制的图标
+    if os.path.exists(icon_path):
+        pix = QPixmap(icon_path)
+        # 缩放到合适的托盘图标尺寸
+        pix = pix.scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        return QIcon(pix)
+    else:
+        # 备用方案：绘制简单的绿色圆形图标
+        pix = QPixmap(32, 32)
+        pix.fill(Qt.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setBrush(QBrush(QColor(34, 197, 94)))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(4, 4, 24, 24)
+        # 白色麦克风简化符号
+        p.setBrush(QBrush(QColor(13, 13, 13)))
+        p.drawRoundedRect(13, 7, 6, 10, 2, 2)
+        p.drawRoundedRect(11, 14, 10, 3, 1, 1)
+        p.end()
+        return QIcon(pix)
 
 
 def _make_eye_icon(visible=True):
@@ -106,6 +119,18 @@ class SettingsWindow(QWidget):
         root.addWidget(subtitle)
         root.addSpacing(6)
 
+        # 创建滚动区域
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; }")
+
+        # 滚动内容容器
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(12)
+
         # 卡片 1: 引擎选择
         engine_card = QGroupBox("引擎选择")
         elayout = QVBoxLayout(engine_card)
@@ -138,7 +163,7 @@ class SettingsWindow(QWidget):
         self._progress_bar.hide()
         elayout.addWidget(self._progress_bar)
 
-        root.addWidget(engine_card)
+        scroll_layout.addWidget(engine_card)
 
         # 卡片 2: API 配置
         self._api_card = QGroupBox("API 配置")
@@ -188,7 +213,7 @@ class SettingsWindow(QWidget):
         self._api_status.setObjectName("status")
         alayout.addWidget(self._api_status)
 
-        root.addWidget(self._api_card)
+        scroll_layout.addWidget(self._api_card)
 
         # 卡片 3: 快捷键
         hotkey_card = QGroupBox("快捷键")
@@ -205,13 +230,13 @@ class SettingsWindow(QWidget):
         hrow.addWidget(self._clear_hotkey_btn)
         hlayout.addLayout(hrow)
 
-        root.addWidget(hotkey_card)
+        scroll_layout.addWidget(hotkey_card)
 
         # 卡片 4: 自定义词库
         vocab_card = QGroupBox("自定义词库")
         vlayout = QVBoxLayout(vocab_card)
 
-        vocab_hint = QLabel("添加常用词汇，纠正识别错误（例如：专业术语、人名等）")
+        vocab_hint = QLabel("添加识别错误的词汇映射（先说一遍，看识别成什么，再添加映射）")
         vocab_hint.setObjectName("subtitle")
         vocab_hint.setWordWrap(True)
         vlayout.addWidget(vocab_hint)
@@ -221,10 +246,10 @@ class SettingsWindow(QWidget):
         self._vocab_list.setMaximumHeight(120)
         vlayout.addWidget(self._vocab_list)
 
-        # 添加词汇输入
+        # 添加热词输入（单个输入框）
         add_row = QHBoxLayout()
         self._vocab_input = QLineEdit()
-        self._vocab_input.setPlaceholderText("输入词汇（例如：Claude、PyTorch）")
+        self._vocab_input.setPlaceholderText("输入热词（如：CUDA、GitHub、Python）")
         add_row.addWidget(self._vocab_input)
 
         add_vocab_btn = QPushButton("添加")
@@ -239,9 +264,12 @@ class SettingsWindow(QWidget):
         del_vocab_btn.clicked.connect(self._delete_vocabulary)
         vlayout.addWidget(del_vocab_btn)
 
-        root.addWidget(vocab_card)
+        scroll_layout.addWidget(vocab_card)
+        scroll_layout.addStretch()
 
-        root.addStretch()
+        # 将滚动区域添加到主布局
+        scroll.setWidget(scroll_content)
+        root.addWidget(scroll)
 
         # 底部按钮行
         btn_row = QHBoxLayout()
@@ -334,11 +362,18 @@ class SettingsWindow(QWidget):
             # 检查模型是否已下载
             self._check_model_status()
 
-        # 自定义词库
+        # 自定义词库（热词列表）
         vocab = self._config.get("custom_vocabulary", [])
         self._vocab_list.clear()
-        for word in vocab:
-            self._vocab_list.addItem(word)
+
+        # 兼容旧版本字典格式，转换为列表
+        if isinstance(vocab, dict):
+            # 提取所有正确词汇作为热词
+            vocab = list(vocab.values())
+            self._config["custom_vocabulary"] = vocab
+
+        for hotword in vocab:
+            self._vocab_list.addItem(hotword)
 
     # ---------- 事件处理 ----------
 
@@ -371,10 +406,11 @@ class SettingsWindow(QWidget):
         sizes = ["tiny", "base", "small"]
         self._config["local_model"] = sizes[size_index]
 
-        # 保存自定义词库
+        # 保存自定义词库（热词列表）
         vocab = []
         for i in range(self._vocab_list.count()):
-            vocab.append(self._vocab_list.item(i).text())
+            hotword = self._vocab_list.item(i).text()
+            vocab.append(hotword)
         self._config["custom_vocabulary"] = vocab
 
         # 保存配置文件
@@ -404,31 +440,34 @@ class SettingsWindow(QWidget):
             self._eye_btn.setIcon(_make_eye_icon(visible=True))
 
     def _add_vocabulary(self):
-        """添加自定义词汇"""
-        word = self._vocab_input.text().strip()
-        if not word:
+        """添加热词"""
+        hotword = self._vocab_input.text().strip()
+
+        if not hotword:
+            self._status_label.setText("请输入热词")
+            QTimer.singleShot(2000, lambda: self._update_status())
             return
 
         # 检查是否已存在
         for i in range(self._vocab_list.count()):
-            if self._vocab_list.item(i).text() == word:
-                self._status_label.setText(f"词汇 '{word}' 已存在")
+            if self._vocab_list.item(i).text() == hotword:
+                self._status_label.setText(f"热词 '{hotword}' 已存在")
                 QTimer.singleShot(2000, lambda: self._update_status())
                 return
 
         # 添加到列表
-        self._vocab_list.addItem(word)
+        self._vocab_list.addItem(hotword)
         self._vocab_input.clear()
-        self._status_label.setText(f"已添加词汇 '{word}'（点击确定保存）")
+        self._status_label.setText(f"已添加热词 '{hotword}'（点击确定保存）")
         QTimer.singleShot(2000, lambda: self._update_status())
 
     def _delete_vocabulary(self):
-        """删除选中的词汇"""
+        """删除选中的热词"""
         current_item = self._vocab_list.currentItem()
         if current_item:
-            word = current_item.text()
+            hotword = current_item.text()
             self._vocab_list.takeItem(self._vocab_list.row(current_item))
-            self._status_label.setText(f"已删除词汇 '{word}'（点击确定保存）")
+            self._status_label.setText(f"已删除热词 '{hotword}'（点击确定保存）")
             QTimer.singleShot(2000, lambda: self._update_status())
 
     def _on_engine_switch(self, index):

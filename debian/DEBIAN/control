@@ -1,5 +1,5 @@
 Package: voice-typing
-Version: 1.0.0
+Version: 1.2.0
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -14,3 +14,7 @@ Description: 实时语音转文字桌面应用
   - 实时浮窗显示录音状态和识别结果
   - 自动粘贴识别结果到光标处
   - 暗黑主题 GUI 设置界面
+  - API Key 显示/隐藏功能
+  - 设置确认机制
+  - 自定义词库纠正识别错误
+

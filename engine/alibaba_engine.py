@@ -10,26 +10,14 @@ from engine.base_engine import BaseEngine
 class ParaformerCallback(RecognitionCallback):
     """接收实时识别结果"""
 
-    def __init__(self, vocabulary=None):
+    def __init__(self):
         super().__init__()
         self.final_text = ""
         self._sentences = []  # 累积所有句子
         self._on_text = None
-        self._vocabulary = vocabulary or []  # 自定义词库
 
     def set_on_text(self, callback):
         self._on_text = callback
-
-    def _apply_vocabulary(self, text):
-        """应用自定义词库进行后处理（如果 API 不支持热词）"""
-        if not self._vocabulary:
-            return text
-        # 简单替换策略：后续可以优化为模糊匹配
-        result = text
-        for word in self._vocabulary:
-            # 这里可以添加更复杂的匹配逻辑
-            pass
-        return result
 
     def on_event(self, result):
         sentence = result.get_sentence()
@@ -67,7 +55,7 @@ class AlibabaEngine(BaseEngine):
         self._callback = None
         self._queue = queue.Queue()
         self._running = False
-        self._vocabulary = vocabulary or []
+        self._vocabulary = vocabulary or []  # 热词列表：["CUDA", "GitHub", "Python"]
 
     def initialize(self) -> bool:
         if not self._api_key:
@@ -82,11 +70,11 @@ class AlibabaEngine(BaseEngine):
         self._api_key = key
 
     def start(self):
-        self._callback = ParaformerCallback(vocabulary=self._vocabulary)
+        self._callback = ParaformerCallback()
         self._queue = queue.Queue()
         self._running = True
 
-        # 尝试使用 vocabulary_id 参数（如果 API 支持）
+        # 构建识别参数
         recognition_params = {
             "model": "paraformer-realtime-v2",
             "format": "pcm",
@@ -96,9 +84,14 @@ class AlibabaEngine(BaseEngine):
             "enable_inverse_text_normalization": True,
         }
 
-        # 如果有自定义词库，尝试传递给 API（可能不支持，需要测试）
-        # if self._vocabulary:
-        #     recognition_params["vocabulary_id"] = self._vocabulary
+        # 如果有自定义热词，尝试传递给API
+        # 注意：中文语音识别对英文单词的识别准确率较低，热词效果可能有限
+        if self._vocabulary:
+            hotwords = ",".join(self._vocabulary)
+            # 尝试多个可能的参数名称
+            recognition_params["vocabulary_id"] = hotwords
+            recognition_params["hotwords"] = hotwords
+            recognition_params["hot_words"] = hotwords
 
         self._recognition = Recognition(**recognition_params)
         self._recognition.start()
