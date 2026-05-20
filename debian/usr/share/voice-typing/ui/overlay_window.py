@@ -109,9 +109,8 @@ class OverlayWindow(QWidget):
         self._text_label.setStyleSheet(
             "color: #f0f0f0; font-size: 15px; background: transparent; padding: 0px;"
         )
-        self._text_label.setWordWrap(True)
+        self._text_label.setWordWrap(False)
         self._text_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self._text_label.setMaximumWidth(600)  # 限制文字标签最大宽度
         self._text_label.hide()  # 初始隐藏
 
         # 布局
@@ -194,6 +193,26 @@ class OverlayWindow(QWidget):
         self._indicator.set_recording(False)
         self._waveform.stop()
 
+    MAX_LABEL_WIDTH = 600
+
+    def _calc_label_geometry(self, text: str):
+        """根据文字计算 label 宽度和对齐方式。
+        短文本：左对齐，label 自适应宽度。
+        超长文本：右对齐，label 固定最大宽度，显示文字尾部。"""
+        fm = QFontMetrics(self._text_label.font())
+        text_width = fm.horizontalAdvance(text) + 10
+
+        if text_width <= self.MAX_LABEL_WIDTH:
+            self._text_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            self._text_label.setMinimumWidth(0)
+            self._text_label.setMaximumWidth(self.MAX_LABEL_WIDTH)
+            return text_width, max(64, fm.height() + 24)
+        else:
+            self._text_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self._text_label.setMinimumWidth(self.MAX_LABEL_WIDTH)
+            self._text_label.setMaximumWidth(self.MAX_LABEL_WIDTH)
+            return self.MAX_LABEL_WIDTH, max(64, fm.height() + 24)
+
     def update_text(self, text: str):
         """实时更新文字（录音时），首次收到文字后隐藏波形"""
         if not text:
@@ -208,13 +227,8 @@ class OverlayWindow(QWidget):
         self._text_label.setText(text)
         self._text_label.show()
 
-        self._text_label.adjustSize()
-        label_size = self._text_label.sizeHint()
-
-        # 窗口宽度 = 圆球 + 间距 + 文字实际宽度 + 边距（波形已隐藏，不计入）
-        width = 24 + 12 + label_size.width() + 32
-        height = max(64, label_size.height() + 24)
-
+        label_width, height = self._calc_label_geometry(text)
+        width = 24 + 12 + label_width + 32
         self._animate_to_size(width, height)
 
     def set_text(self, text: str):
@@ -222,20 +236,12 @@ class OverlayWindow(QWidget):
         if not text:
             return
 
-        # 隐藏波形，显示文字
         self._waveform.hide()
         self._text_label.setText(text)
         self._text_label.show()
 
-        # 让 QLabel 自己计算换行后的尺寸
-        self._text_label.adjustSize()
-        label_size = self._text_label.sizeHint()
-
-        # 窗口宽度 = 圆球 + 间距 + 文字实际宽度 + 边距
-        width = 24 + 12 + label_size.width() + 32
-        # 窗口高度 = 文字实际高度 + 边距
-        height = max(64, label_size.height() + 24)
-
+        label_width, height = self._calc_label_geometry(text)
+        width = 24 + 12 + label_width + 32
         self._animate_to_size(width, height)
 
     def reset(self):
