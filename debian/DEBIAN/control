@@ -1,5 +1,5 @@
 Package: voice-typing
-Version: 1.3.4
+Version: 1.4.0
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -10,11 +10,11 @@ Description: 实时语音转文字桌面应用
  .
  功能特性：
   - 支持阿里云 Paraformer 和 faster-whisper 本地引擎
+  - 支持火山引擎 BigModel ASR + 豆包大模型润色
+  - 大模型润色（Qwen/豆包）让输出更连续流畅，三档强度可调
   - 全局快捷键 (Ctrl+Alt+S) 控制录音
   - 实时浮窗显示录音状态和识别结果
   - 自动粘贴识别结果到光标处
   - 暗黑主题 GUI 设置界面
-  - API Key 显示/隐藏功能
-  - 设置确认机制
   - 自定义词库纠正识别错误
 

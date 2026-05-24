@@ -8,7 +8,7 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 setup(
     name="voice-typing",
-    version="1.3.4",
+    version="1.4.0",
     author="hongyan199048",
     description="Ubuntu 环境下的 AI 语音转文字工具",
     long_description=long_description,
