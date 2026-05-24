@@ -5,3 +5,5 @@ pynput
 faster-whisper
 numpy
 deepmultilingualpunctuation
+websockets
+openai

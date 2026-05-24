@@ -1,5 +1,5 @@
 Package: voice-typing
-Version: 1.3.2
+Version: 1.3.4
 Section: utils
 Priority: optional
 Architecture: amd64

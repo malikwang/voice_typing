@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""兼容旧版入口，调用新的包结构"""
+"""VoiceType 命令行入口"""
 
 from voice_typing.app import main
 
