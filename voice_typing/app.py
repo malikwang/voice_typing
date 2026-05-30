@@ -5,7 +5,6 @@ import os
 import sys
 import subprocess
 import threading
-import time
 from functools import partial
 
 from PyQt5.QtCore import pyqtSignal, pyqtSlot, QObject, Qt, QTimer
@@ -292,9 +291,8 @@ class VoiceTypingApp(QObject):
         if not text:
             return
 
-        from pynput.keyboard import Controller as KBController, Key as KBKey
-
         try:
+            # 写入剪贴板
             proc = subprocess.Popen(
                 ["xclip", "-selection", "clipboard"],
                 stdin=subprocess.PIPE,
@@ -305,35 +303,31 @@ class VoiceTypingApp(QObject):
             if proc.returncode != 0:
                 print(f"[ERROR] xclip 写入失败，返回码: {proc.returncode}")
                 return
-            time.sleep(0.2)
 
+            # 暂停热键触发（不停止 listener，避免 X11 焦点丢失）
             self._hotkey.pause()
-            time.sleep(0.1)
-            try:
-                kb = KBController()
-                if self._is_terminal_window():
-                    print("[DEBUG] 终端窗口 → Ctrl+Shift+V")
-                    kb.press(KBKey.ctrl)
-                    kb.press(KBKey.shift)
-                    time.sleep(0.03)
-                    kb.press('v')
-                    kb.release('v')
-                    time.sleep(0.03)
-                    kb.release(KBKey.shift)
-                    kb.release(KBKey.ctrl)
-                else:
-                    print("[DEBUG] 非终端窗口 → Ctrl+V")
-                    kb.press(KBKey.ctrl)
-                    time.sleep(0.03)
-                    kb.press('v')
-                    kb.release('v')
-                    time.sleep(0.03)
-                    kb.release(KBKey.ctrl)
-            finally:
-                time.sleep(0.1)
-                self._hotkey.resume()
+
+            # 清除 X11 层面卡住的修饰键，防止光标消失 / 快捷键失效
+            self._hotkey.clear_x11_modifiers()
+
+            if self._is_terminal_window():
+                subprocess.run(
+                    ["xdotool", "key", "ctrl+shift+v"],
+                    timeout=2,
+                )
+            else:
+                subprocess.run(
+                    ["xdotool", "key", "ctrl+v"],
+                    timeout=2,
+                )
+
+            self._hotkey.resume()
         except Exception as e:
             print(f"[ERROR] 粘贴过程出错: {e}")
+            try:
+                self._hotkey.resume()
+            except Exception:
+                pass
 
     def run(self):
         print("[DEBUG] 显示设置窗口...")
