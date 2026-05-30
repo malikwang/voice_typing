@@ -15,10 +15,11 @@ from PyQt5.QtWidgets import (
     QRadioButton, QButtonGroup,
 )
 
-from config_manager import load_config, save_config
-from engine.alibaba_engine import AlibabaEngine
-from engine.local_engine import LocalEngine, download_model
-from vocabulary_manager import sync_vocabulary
+from voice_typing.core.config import load_config, save_config
+from voice_typing.engine.alibaba import AlibabaEngine
+from voice_typing.engine.local import LocalEngine, download_model
+from voice_typing.engine.volcengine import VolcengineEngine
+from voice_typing.core.vocabulary import sync_vocabulary
 
 
 def _make_tray_icon():
@@ -140,6 +141,7 @@ class SettingsWindow(QWidget):
 
         self._engine_combo = QComboBox()
         self._engine_combo.addItem("阿里云 Paraformer（云端）", "alibaba")
+        self._engine_combo.addItem("火山引擎 BigModel（云端）- 开发中", "volcengine")
         self._engine_combo.addItem("faster-whisper（本地）", "local")
         self._engine_combo.currentIndexChanged.connect(self._on_engine_preview)
         elayout.addWidget(self._engine_combo)
@@ -168,49 +170,79 @@ class SettingsWindow(QWidget):
 
         scroll_layout.addWidget(engine_card)
 
-        # 卡片 2: API 配置
+        # 卡片 2: API 配置（动态切换：阿里云 / 火山引擎）
         self._api_card = QGroupBox("API 配置")
         alayout = QVBoxLayout(self._api_card)
 
-        # API 输入框（带内嵌按钮的自定义容器）
-        api_wrapper = QWidget()
+        # --- 阿里云 API Key 输入（带眼睛按钮） ---
+        self._alibaba_api_widget = QWidget()
+        api_wrapper = QWidget(self._alibaba_api_widget)
         api_wrapper.setFixedHeight(40)
 
-        # 输入框
         self._api_input = QLineEdit(api_wrapper)
         self._api_input.setPlaceholderText("输入阿里云 DashScope API Key")
         self._api_input.setEchoMode(QLineEdit.Password)
-        self._api_input.setGeometry(0, 0, 400, 40)  # 初始宽度，会自动调整
+        self._api_input.setGeometry(0, 0, 400, 40)
         self._api_input.setStyleSheet("padding-right: 40px;")
 
-        # 眼睛按钮（绝对定位在输入框内部右侧）
         self._eye_btn = QPushButton(api_wrapper)
         self._eye_btn.setIcon(_make_eye_icon(visible=True))
         self._eye_btn.setFixedSize(35, 35)
         self._eye_btn.setStyleSheet("""
-            QPushButton {
-                border: none;
-                background: transparent;
-            }
-            QPushButton:hover {
-                background: rgba(255, 255, 255, 0.1);
-                border-radius: 4px;
-            }
+            QPushButton { border: none; background: transparent; }
+            QPushButton:hover { background: rgba(255, 255, 255, 0.1); border-radius: 4px; }
         """)
         self._eye_btn.setCursor(Qt.PointingHandCursor)
         self._eye_btn.setToolTip("显示/隐藏 API Key")
         self._eye_btn.clicked.connect(self._toggle_api_visibility)
 
-        # 监听容器大小变化，动态调整控件位置
         def resize_api_widgets():
             w = api_wrapper.width()
             self._api_input.setGeometry(0, 0, w, 40)
             self._eye_btn.setGeometry(w - 38, 3, 35, 35)
-
         api_wrapper.resizeEvent = lambda e: resize_api_widgets()
         resize_api_widgets()
 
-        alayout.addWidget(api_wrapper)
+        alibaba_api_layout = QVBoxLayout(self._alibaba_api_widget)
+        alibaba_api_layout.setContentsMargins(0, 0, 0, 0)
+        alibaba_api_layout.addWidget(api_wrapper)
+        alayout.addWidget(self._alibaba_api_widget)
+
+        # --- 火山引擎 API 输入（ASR + 豆包润色） ---
+        self._volc_api_widget = QWidget()
+        volc_layout = QVBoxLayout(self._volc_api_widget)
+        volc_layout.setContentsMargins(0, 0, 0, 0)
+        volc_layout.setSpacing(8)
+
+        volc_asr_label = QLabel("语音识别 (ASR)")
+        volc_asr_label.setObjectName("subtitle")
+        volc_layout.addWidget(volc_asr_label)
+
+        self._volc_app_id_input = QLineEdit()
+        self._volc_app_id_input.setPlaceholderText("App ID（X-Api-App-Key）")
+        self._volc_app_id_input.setEchoMode(QLineEdit.Password)
+        volc_layout.addWidget(self._volc_app_id_input)
+
+        self._volc_access_token_input = QLineEdit()
+        self._volc_access_token_input.setPlaceholderText("Access Token（X-Api-Access-Key）")
+        self._volc_access_token_input.setEchoMode(QLineEdit.Password)
+        volc_layout.addWidget(self._volc_access_token_input)
+
+        volc_llm_label = QLabel("文本润色 (豆包大模型)")
+        volc_llm_label.setObjectName("subtitle")
+        volc_layout.addWidget(volc_llm_label)
+
+        self._doubao_api_key_input = QLineEdit()
+        self._doubao_api_key_input.setPlaceholderText("豆包 ARK API Key")
+        self._doubao_api_key_input.setEchoMode(QLineEdit.Password)
+        volc_layout.addWidget(self._doubao_api_key_input)
+
+        self._doubao_endpoint_input = QLineEdit()
+        self._doubao_endpoint_input.setPlaceholderText("推理接入点 ID（ep-xxxxxxxxxxxx）")
+        volc_layout.addWidget(self._doubao_endpoint_input)
+
+        alayout.addWidget(self._volc_api_widget)
+        self._volc_api_widget.hide()
 
         self._api_status = QLabel("")
         self._api_status.setObjectName("status")
@@ -254,7 +286,7 @@ class SettingsWindow(QWidget):
         playout.addWidget(self._polish_medium)
         playout.addWidget(self._polish_strong)
 
-        polish_hint = QLabel("ASR 识别后调用千问大模型润色文本的力度")
+        polish_hint = QLabel("ASR 识别后调用大模型润色文本的力度（服务商在上方选择）")
         polish_hint.setObjectName("subtitle")
         playout.addWidget(polish_hint)
 
@@ -265,7 +297,7 @@ class SettingsWindow(QWidget):
         vlayout = QVBoxLayout(vocab_card)
         vlayout.setSpacing(8)
 
-        vocab_hint = QLabel("添加专业词汇，可选填发音别名（你说别名，自动替换为正确词汇）")
+        vocab_hint = QLabel("添加专业词汇，ASR 识别和 LLM 润色时会自动修正")
         vocab_hint.setObjectName("subtitle")
         vocab_hint.setWordWrap(True)
         vlayout.addWidget(vocab_hint)
@@ -275,25 +307,18 @@ class SettingsWindow(QWidget):
         self._vocab_list.setMaximumHeight(120)
         vlayout.addWidget(self._vocab_list)
 
-        # 输入行 1: 正确词汇
+        # 输入行: 词汇 + 添加按钮
         term_row = QHBoxLayout()
         self._vocab_term_input = QLineEdit()
-        self._vocab_term_input.setPlaceholderText("正确词汇（如：rviz）")
+        self._vocab_term_input.setPlaceholderText("输入词汇（如：rviz）")
         term_row.addWidget(self._vocab_term_input)
-        vlayout.addLayout(term_row)
-
-        # 输入行 2: 发音别名（可选）
-        alias_row = QHBoxLayout()
-        self._vocab_alias_input = QLineEdit()
-        self._vocab_alias_input.setPlaceholderText("发音别名（可选，如：阿维兹）")
-        alias_row.addWidget(self._vocab_alias_input)
 
         add_vocab_btn = QPushButton("添加")
         add_vocab_btn.setObjectName("accent")
         add_vocab_btn.setFixedWidth(80)
         add_vocab_btn.clicked.connect(self._add_vocabulary)
-        alias_row.addWidget(add_vocab_btn)
-        vlayout.addLayout(alias_row)
+        term_row.addWidget(add_vocab_btn)
+        vlayout.addLayout(term_row)
 
         # 删除按钮
         del_vocab_btn = QPushButton("删除选中")
@@ -359,11 +384,17 @@ class SettingsWindow(QWidget):
     # ---------- 引擎 ----------
 
     def _create_engine(self):
-        engine_type = self._config["engine"]
+        engine_type = self._config.get("engine", "alibaba")
         if engine_type == "alibaba":
             engine = AlibabaEngine(
                 api_key=self._config.get("alibaba_api_key", ""),
                 phrase_id=self._config.get("phrase_id", ""),
+            )
+            engine.initialize()
+        elif engine_type == "volcengine":
+            engine = VolcengineEngine(
+                app_id=self._config.get("volc_asr_app_id", ""),
+                access_token=self._config.get("volc_asr_access_token", ""),
             )
             engine.initialize()
         else:
@@ -382,9 +413,13 @@ class SettingsWindow(QWidget):
         if idx >= 0:
             self._engine_combo.setCurrentIndex(idx)
 
-        # API Key
+        # 阿里云 API Key
         api_key = self._config.get("alibaba_api_key", "")
         self._api_input.setText(api_key)
+
+        # 火山引擎 ASR 凭证
+        self._volc_app_id_input.setText(self._config.get("volc_asr_app_id", ""))
+        self._volc_access_token_input.setText(self._config.get("volc_asr_access_token", ""))
 
         # 本地模型
         local = self._config.get("local_model", "base")
@@ -396,12 +431,18 @@ class SettingsWindow(QWidget):
         if engine == "alibaba":
             self._local_widget.hide()
             self._progress_bar.hide()
-            self._api_card.show()
-            self._api_input.setEnabled(True)
+            self._alibaba_api_widget.show()
+            self._volc_api_widget.hide()
+        elif engine == "volcengine":
+            self._local_widget.hide()
+            self._progress_bar.hide()
+            self._alibaba_api_widget.hide()
+            self._volc_api_widget.show()
         else:
             self._local_widget.show()
             self._progress_bar.hide()
-            self._api_card.hide()
+            self._alibaba_api_widget.hide()
+            self._volc_api_widget.hide()
             # 检查模型是否已下载
             self._check_model_status()
 
@@ -417,18 +458,11 @@ class SettingsWindow(QWidget):
         for item_data in vocab:
             if isinstance(item_data, dict):
                 term = item_data.get("term", "")
-                alias = item_data.get("alias", "")
             else:
                 term = str(item_data)
-                alias = ""
 
-            if alias:
-                display = f"{alias} → {term}"
-            else:
-                display = term
-
-            list_item = QListWidgetItem(display)
-            list_item.setData(Qt.UserRole, {"term": term, "alias": alias} if alias else {"term": term})
+            list_item = QListWidgetItem(term)
+            list_item.setData(Qt.UserRole, {"term": term})
             self._vocab_list.addItem(list_item)
 
         # 开机自动启动
@@ -440,6 +474,10 @@ class SettingsWindow(QWidget):
         if btn:
             btn.setChecked(True)
 
+        # 豆包润色凭证
+        self._doubao_api_key_input.setText(self._config.get("doubao_api_key", ""))
+        self._doubao_endpoint_input.setText(self._config.get("doubao_endpoint_id", ""))
+
     # ---------- 事件处理 ----------
 
     def _on_engine_preview(self, index):
@@ -449,13 +487,19 @@ class SettingsWindow(QWidget):
         if engine_type == "local":
             self._local_widget.show()
             self._progress_bar.hide()
-            self._api_card.hide()
+            self._alibaba_api_widget.hide()
+            self._volc_api_widget.hide()
             self._check_model_status()
-        else:
+        elif engine_type == "volcengine":
             self._local_widget.hide()
             self._progress_bar.hide()
-            self._api_card.show()
-            self._api_input.setEnabled(True)
+            self._alibaba_api_widget.hide()
+            self._volc_api_widget.show()
+        else:  # alibaba
+            self._local_widget.hide()
+            self._progress_bar.hide()
+            self._alibaba_api_widget.show()
+            self._volc_api_widget.hide()
 
     def _on_apply(self):
         """确定按钮：保存配置并应用"""
@@ -463,9 +507,13 @@ class SettingsWindow(QWidget):
         engine_type = self._engine_combo.currentData()
         self._config["engine"] = engine_type
 
-        # 保存 API Key
+        # 保存阿里云 API Key
         api_key = self._api_input.text()
         self._config["alibaba_api_key"] = api_key
+
+        # 保存火山引擎 ASR 凭证
+        self._config["volc_asr_app_id"] = self._volc_app_id_input.text()
+        self._config["volc_asr_access_token"] = self._volc_access_token_input.text()
 
         # 保存本地模型
         size_index = self._model_combo.currentIndex()
@@ -485,19 +533,19 @@ class SettingsWindow(QWidget):
         else:
             self._config["polish_strength"] = "medium"
 
+        # 保存豆包润色凭证
+        self._config["doubao_api_key"] = self._doubao_api_key_input.text()
+        self._config["doubao_endpoint_id"] = self._doubao_endpoint_input.text()
+
         # 保存自定义词库
         vocab = []
         hotwords = []  # 仅术语列表，用于 Paraformer 热词 API
         for i in range(self._vocab_list.count()):
-            data = self._vocab_list.item(i).data(Qt.UserRole)
-            if data:
-                vocab.append(data)
-                hotwords.append(data["term"])
-            else:
-                # fallback: 旧格式纯文本
-                term = self._vocab_list.item(i).text()
-                vocab.append({"term": term})
-                hotwords.append(term)
+            item = self._vocab_list.item(i)
+            data = item.data(Qt.UserRole)
+            term = data.get("term") if data else item.text()
+            vocab.append({"term": term})
+            hotwords.append(term)
         self._config["custom_vocabulary"] = vocab
 
         # 同步热词表到阿里云，获取 phrase_id
@@ -545,12 +593,11 @@ class SettingsWindow(QWidget):
             self._eye_btn.setIcon(_make_eye_icon(visible=True))
 
     def _add_vocabulary(self):
-        """添加词汇（可选发音别名）"""
+        """添加词汇"""
         term = self._vocab_term_input.text().strip()
-        alias = self._vocab_alias_input.text().strip()
 
         if not term:
-            self._status_label.setText("请输入正确词汇")
+            self._status_label.setText("请输入词汇")
             QTimer.singleShot(2000, lambda: self._update_status())
             return
 
@@ -563,19 +610,12 @@ class SettingsWindow(QWidget):
                 QTimer.singleShot(2000, lambda: self._update_status())
                 return
 
-        # 显示文本
-        if alias:
-            display = f"{alias} → {term}"
-        else:
-            display = term
-
-        item = QListWidgetItem(display)
-        item.setData(Qt.UserRole, {"term": term, "alias": alias} if alias else {"term": term})
+        item = QListWidgetItem(term)
+        item.setData(Qt.UserRole, {"term": term})
         self._vocab_list.addItem(item)
 
         self._vocab_term_input.clear()
-        self._vocab_alias_input.clear()
-        hint = f"已添加 '{display}'（点击确定保存）"
+        hint = f"已添加 '{term}'（点击确定保存）"
         self._status_label.setText(hint)
         QTimer.singleShot(2000, lambda: self._update_status())
 
@@ -689,7 +729,7 @@ class SettingsWindow(QWidget):
             # 重启监听
             self._hotkey.start()
 
-        from hotkey_manager import HotkeyManager
+        from voice_typing.core.hotkey import HotkeyManager
         self._record_listener = HotkeyManager.record_key_sequence(on_done)
 
     def _clear_hotkey(self):

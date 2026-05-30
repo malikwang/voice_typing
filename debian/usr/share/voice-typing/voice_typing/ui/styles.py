@@ -123,7 +123,7 @@ QCheckBox::indicator {
 QCheckBox::indicator:checked {
     background: #22c55e;
     border-color: #22c55e;
-    image: url(ui/image/checkmark.svg);
+    image: url(voice_typing/ui/resources/checkmark.svg);
 }
 
 /* 单选按钮 */

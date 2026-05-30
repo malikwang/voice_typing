@@ -5,7 +5,6 @@ import os
 import sys
 import subprocess
 import threading
-import time
 from functools import partial
 
 from PyQt5.QtCore import pyqtSignal, pyqtSlot, QObject, Qt, QTimer
@@ -15,6 +14,7 @@ from voice_typing.core.config import load_config
 from voice_typing.core.hotkey import HotkeyManager
 from voice_typing.engine.alibaba import AlibabaEngine
 from voice_typing.engine.local import LocalEngine
+from voice_typing.engine.volcengine import VolcengineEngine
 from voice_typing.ui.styles import DARK_STYLE, OVERLAY_STYLE
 from voice_typing.ui.settings import SettingsWindow
 from voice_typing.ui.overlay import OverlayWindow
@@ -53,11 +53,16 @@ class VoiceTypingApp(QObject):
         self._overlay.show()
 
     def _create_engine(self):
-        engine_type = self._config["engine"]
+        engine_type = self._config.get("engine", "alibaba")
         if engine_type == "alibaba":
             self._engine = AlibabaEngine(
                 api_key=self._config.get("alibaba_api_key", ""),
                 phrase_id=self._config.get("phrase_id", ""),
+            )
+        elif engine_type == "volcengine":
+            self._engine = VolcengineEngine(
+                app_id=self._config.get("volc_asr_app_id", ""),
+                access_token=self._config.get("volc_asr_access_token", ""),
             )
         else:
             self._engine = LocalEngine(model_size=self._config.get("local_model", "base"))
@@ -111,22 +116,31 @@ class VoiceTypingApp(QObject):
         QTimer.singleShot(2500, self._overlay.reset)
 
     def _run_polish(self, raw_text):
-        polished = self._polish_text(raw_text)
+        engine = self._config.get("engine", "alibaba")
+        if engine == "volcengine":
+            polished = self._polish_with_doubao(raw_text)
+        elif engine == "local":
+            polished = raw_text
+        else:
+            polished = self._polish_with_qwen(raw_text)
         polished = self._apply_alias_map(polished)
         self.polish_done.emit(polished)
 
     def _apply_alias_map(self, text):
-        """将发音别名替换为正确词汇"""
+        """将发音别名替换为正确词汇（支持逗号分隔多个别名）"""
         vocab = self._config.get("custom_vocabulary", [])
         for item in vocab:
             if isinstance(item, dict):
-                alias = item.get("alias", "")
+                alias_str = item.get("alias", "")
                 term = item.get("term", "")
             else:
-                # 旧格式：纯字符串，无别名
                 continue
-            if alias and alias in text:
-                text = text.replace(alias, term)
+            if not alias_str or not term:
+                continue
+            for alias in alias_str.split(","):
+                alias = alias.strip()
+                if alias and alias in text:
+                    text = text.replace(alias, term)
         return text
 
     _POLISH_PROMPTS = {
@@ -173,10 +187,9 @@ class VoiceTypingApp(QObject):
             f"请根据上下文将发音相似的词修正为这些正确词汇：{term_list}。"
         )
 
-    def _polish_text(self, raw_text):
+    def _polish_with_qwen(self, raw_text):
         api_key = self._config.get("alibaba_api_key", "")
         if not api_key:
-            print("[润色] 未配置 API Key，跳过润色")
             return raw_text
 
         strength = self._config.get("polish_strength", "medium")
@@ -198,14 +211,47 @@ class VoiceTypingApp(QObject):
             )
             if response.status_code == 200:
                 polished = response.output.choices[0].message.content.strip()
-                print(f"[润色] 原文: '{raw_text}'")
-                print(f"[润色] 结果: '{polished}'")
+                print(f"[Qwen润色] '{raw_text}' → '{polished}'")
                 return polished
             else:
-                print(f"[润色] API 失败: {response.code} {response.message}")
+                print(f"[Qwen润色] API 失败: {response.code} {response.message}")
                 return raw_text
         except Exception as e:
-            print(f"[润色] 异常: {e}")
+            print(f"[Qwen润色] 异常: {e}")
+            return raw_text
+
+    def _polish_with_doubao(self, raw_text):
+        api_key = self._config.get("doubao_api_key", "")
+        endpoint_id = self._config.get("doubao_endpoint_id", "")
+        if not api_key or not endpoint_id:
+            print("[Doubao润色] 未配置 API Key 或 Endpoint ID，跳过润色")
+            return raw_text
+
+        strength = self._config.get("polish_strength", "medium")
+        system_prompt = self._POLISH_PROMPTS.get(strength, self._POLISH_PROMPTS["medium"])
+        system_prompt += self._build_vocabulary_hint()
+
+        try:
+            from openai import OpenAI
+
+            client = OpenAI(
+                api_key=api_key,
+                base_url="https://ark.cn-beijing.volces.com/api/v3",
+            )
+            response = client.chat.completions.create(
+                model=endpoint_id,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": raw_text},
+                ],
+                temperature=0.3,
+                timeout=30,
+            )
+            polished = response.choices[0].message.content.strip()
+            print(f"[Doubao润色] '{raw_text}' → '{polished}'")
+            return polished
+        except Exception as e:
+            print(f"[Doubao润色] 异常: {e}")
             return raw_text
 
     _TERMINAL_CLASSES = [
@@ -245,9 +291,8 @@ class VoiceTypingApp(QObject):
         if not text:
             return
 
-        from pynput.keyboard import Controller as KBController, Key as KBKey
-
         try:
+            # 写入剪贴板
             proc = subprocess.Popen(
                 ["xclip", "-selection", "clipboard"],
                 stdin=subprocess.PIPE,
@@ -258,35 +303,31 @@ class VoiceTypingApp(QObject):
             if proc.returncode != 0:
                 print(f"[ERROR] xclip 写入失败，返回码: {proc.returncode}")
                 return
-            time.sleep(0.2)
 
+            # 暂停热键触发（不停止 listener，避免 X11 焦点丢失）
             self._hotkey.pause()
-            time.sleep(0.1)
-            try:
-                kb = KBController()
-                if self._is_terminal_window():
-                    print("[DEBUG] 终端窗口 → Ctrl+Shift+V")
-                    kb.press(KBKey.ctrl)
-                    kb.press(KBKey.shift)
-                    time.sleep(0.03)
-                    kb.press('v')
-                    kb.release('v')
-                    time.sleep(0.03)
-                    kb.release(KBKey.shift)
-                    kb.release(KBKey.ctrl)
-                else:
-                    print("[DEBUG] 非终端窗口 → Ctrl+V")
-                    kb.press(KBKey.ctrl)
-                    time.sleep(0.03)
-                    kb.press('v')
-                    kb.release('v')
-                    time.sleep(0.03)
-                    kb.release(KBKey.ctrl)
-            finally:
-                time.sleep(0.1)
-                self._hotkey.resume()
+
+            # 清除 X11 层面卡住的修饰键，防止光标消失 / 快捷键失效
+            self._hotkey.clear_x11_modifiers()
+
+            if self._is_terminal_window():
+                subprocess.run(
+                    ["xdotool", "key", "ctrl+shift+v"],
+                    timeout=2,
+                )
+            else:
+                subprocess.run(
+                    ["xdotool", "key", "ctrl+v"],
+                    timeout=2,
+                )
+
+            self._hotkey.resume()
         except Exception as e:
             print(f"[ERROR] 粘贴过程出错: {e}")
+            try:
+                self._hotkey.resume()
+            except Exception:
+                pass
 
     def run(self):
         print("[DEBUG] 显示设置窗口...")

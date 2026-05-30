@@ -7,7 +7,7 @@ import tempfile
 import wave
 
 import numpy as np
-from engine.base_engine import BaseEngine
+from voice_typing.engine.base import BaseEngine
 
 WHISPER_MODELS = {
     "tiny": "tiny",

@@ -4,7 +4,7 @@ import queue
 import dashscope
 from dashscope.audio.asr import Recognition, RecognitionCallback
 
-from engine.base_engine import BaseEngine
+from voice_typing.engine.base import BaseEngine
 
 
 class ParaformerCallback(RecognitionCallback):

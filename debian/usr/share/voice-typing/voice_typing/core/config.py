@@ -7,14 +7,18 @@ CONFIG_DIR = os.path.expanduser("~/.config/voice_typing")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 
 DEFAULT_CONFIG = {
-    "engine": "alibaba",
-    "alibaba_api_key": "",
+    "engine": "alibaba",            # "alibaba" | "volcengine" | "local"
+    "alibaba_api_key": "",          # 阿里云 DashScope API Key（ASR + 润色共用）
+    "volc_asr_app_id": "",          # 火山引擎 ASR App ID
+    "volc_asr_access_token": "",   # 火山引擎 ASR Access Token
     "local_model": "base",
     "hotkey": ["ctrl", "alt", "v"],
     "first_run": True,
-    "custom_vocabulary": [],  # 自定义热词列表：["CUDA", "GitHub", "Python"]
-    "phrase_id": "",  # 阿里云热词表ID（UUID，由VocabularyService创建）
-    "polish_strength": "medium",  # 润色强度：light / medium / strong
+    "custom_vocabulary": [],        # 自定义热词列表：["CUDA", "GitHub", "Python"]
+    "phrase_id": "",                # 阿里云热词表ID（UUID，由VocabularyService创建）
+    "polish_strength": "medium",    # 润色强度：light / medium / strong
+    "doubao_api_key": "",           # 豆包 ARK API Key
+    "doubao_endpoint_id": "",       # 豆包推理接入点 ID（ep-xxxxxxxxxxxx）
 }
 
 

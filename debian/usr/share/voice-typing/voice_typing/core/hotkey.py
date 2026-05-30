@@ -1,5 +1,6 @@
 """全局快捷键管理 — 基于 pynput 的 push-to-talk 监听"""
 
+import subprocess
 import threading
 import time
 import pynput.keyboard as keyboard
@@ -59,14 +60,21 @@ class HotkeyManager:
     - 组合键（多键）：全部按下立即触发录音
     - 单键长按（一键）：按住超过 1 秒触发录音，松手结束
 
-    录音期间自动 suppress 按键，防止修饰键先松开导致字符键泄漏到应用。
+    关键设计：
+    - pause/resume 不停止 pynput listener（避免 X11 grab 释放导致窗口焦点丢失），
+      仅设置 _paused 标志屏蔽热键触发
+    - 卡键检测线程：超过 MAX_KEY_HOLD_SEC 未释放的按键自动清除，
+      防止 X11 丢失 key-up 事件导致修饰键永久残留
     """
 
-    LONG_PRESS_SEC = 0
+    LONG_PRESS_SEC = 0.12
+    MAX_KEY_HOLD_SEC = 10.0        # 单键最长保持，超时自动清除
+    STALE_CHECK_INTERVAL = 3.0     # 卡键检测间隔
 
     def __init__(self, hotkey_list=None):
         self._keys = set()
-        self._lock = threading.RLock()  # 可重入锁，避免 _on_release → _on_long_press_release 死锁
+        self._press_times = {}      # key → timestamp，检测卡键
+        self._lock = threading.RLock()
         self._listener = None
         self._recording = False
         self._on_start = None
@@ -75,14 +83,19 @@ class HotkeyManager:
         self._is_long_press = False
         self._press_time = None
         self._long_press_timer = None
+        self._paused = False
+        self._stale_timer_running = False
 
         if hotkey_list:
             self.set_hotkey(hotkey_list)
+
+    # ---- public API ----
 
     def set_hotkey(self, hotkey_list):
         keys = frozenset(_str_to_key(s) for s in hotkey_list)
         self._hotkey_set = keys
         self._is_long_press = len(hotkey_list) == 1
+        self._clear_state()
 
     def set_callbacks(self, on_start, on_stop):
         self._on_start = on_start
@@ -91,49 +104,100 @@ class HotkeyManager:
     def start(self):
         if self._listener is not None:
             return
-        self._start_listener(suppress=False)
+        self._clear_state()
+        self._paused = False
+        self._listener = keyboard.Listener(
+            on_press=self._on_press,
+            on_release=self._on_release,
+            suppress=False,
+        )
+        self._listener.start()
+        self._start_stale_checker()
 
     def stop(self):
+        self._stop_stale_checker()
         if self._listener:
             self._listener.stop()
             self._listener = None
+        self._clear_state()
 
     def pause(self):
-        """暂停监听（粘贴前调用，防止 pynput 拦截 XTest 事件）"""
-        if self._listener:
-            self._listener.stop()
-            self._listener = None
+        """暂停热键触发（粘贴前调用），不停止监听器避免 X11 焦点丢失"""
+        with self._lock:
+            self._paused = True
+            self._keys.clear()
+            self._press_times.clear()
+            self._recording = False
 
     def resume(self):
-        """恢复监听（粘贴后调用）"""
-        if self._listener is None:
-            self._start_listener(suppress=False)
+        """恢复热键触发（粘贴后调用）"""
+        with self._lock:
+            self._paused = False
+            self._keys.clear()
+            self._press_times.clear()
 
-    def _start_listener(self, suppress, on_ready=None):
-        """启动键盘监听，suppress=True 时阻塞按键不传递给其他应用。
-        在独立线程中切换，避免在 listener 回调中 stop 导致死锁。
-        on_ready 在 passthrough 模式 listener 就绪后回调。"""
-        def _switch():
-            if self._listener:
-                self._listener.stop()
-            self._listener = keyboard.Listener(
-                on_press=self._on_press,
-                on_release=self._on_release,
-                suppress=suppress,
+    @staticmethod
+    def clear_x11_modifiers():
+        """释放 X11 层面所有卡住的修饰键（解决丢事件导致的系统级卡键）"""
+        try:
+            subprocess.run(
+                ["xdotool", "keyup", "ctrl", "alt", "shift", "super"],
+                timeout=1,
+                capture_output=True,
             )
-            self._listener.start()
-            if on_ready and not suppress:
-                on_ready()
-        threading.Thread(target=_switch, daemon=True).start()
+        except Exception:
+            pass
+
+    # ---- 内部 ----
+
+    def _clear_state(self):
+        with self._lock:
+            self._keys.clear()
+            self._press_times.clear()
+            self._recording = False
+
+    def _start_stale_checker(self):
+        self._stop_stale_checker()
+        self._stale_timer_running = True
+        threading.Thread(target=self._stale_check_loop, daemon=True).start()
+
+    def _stop_stale_checker(self):
+        self._stale_timer_running = False
+
+    def _stale_check_loop(self):
+        while self._stale_timer_running:
+            time.sleep(self.STALE_CHECK_INTERVAL)
+            if not self._stale_timer_running:
+                return
+            self._purge_stale_keys()
+
+    def _purge_stale_keys(self):
+        now = time.time()
+        with self._lock:
+            # 录音中不检测卡键：长按模式下用户会一直按住触发键，属于正常行为
+            if self._recording:
+                return
+            stale = [
+                k for k, t in self._press_times.items()
+                if now - t > self.MAX_KEY_HOLD_SEC
+            ]
+            if stale:
+                for k in stale:
+                    self._keys.discard(k)
+                    self._press_times.pop(k, None)
+                if self._is_long_press:
+                    self._on_long_press_release()
+                else:
+                    self._check_combo_stop()
+                self.clear_x11_modifiers()
 
     # ---- 单键长按模式 ----
 
     def _on_long_press_start(self):
         with self._lock:
-            if self._recording:
+            if self._recording or self._paused:
                 return
             self._recording = True
-            self._start_listener(suppress=True)
             if self._on_start:
                 self._on_start()
 
@@ -143,18 +207,19 @@ class HotkeyManager:
                 self._long_press_timer.cancel()
                 self._long_press_timer = None
             self._press_time = None
-            if self._recording:
-                self._recording = False
-                # 等 passthrough listener 就绪后再触发 stop，确保粘贴时按键不被阻塞
-                self._start_listener(suppress=False, on_ready=self._on_stop)
+            was_recording = self._recording
+            self._recording = False
+            if was_recording and self._on_stop:
+                self._on_stop()
 
     # ---- 组合键模式 ----
 
     def _check_combo_start(self):
+        if self._paused:
+            return
         if self._hotkey_set and self._hotkey_set.issubset(self._keys):
             if not self._recording:
                 self._recording = True
-                self._start_listener(suppress=True)
                 if self._on_start:
                     self._on_start()
 
@@ -162,16 +227,20 @@ class HotkeyManager:
         if self._hotkey_set and not self._hotkey_set.issubset(self._keys):
             if self._recording:
                 self._recording = False
-                self._start_listener(suppress=False, on_ready=self._on_stop)
+                if self._on_stop:
+                    self._on_stop()
 
     # ---- 事件分发 ----
 
     def _on_press(self, key):
         with self._lock:
             k = _norm(key)
+            if k in self._keys:
+                return
             self._keys.add(k)
+            self._press_times[k] = time.time()
 
-            if not self._hotkey_set:
+            if not self._hotkey_set or self._paused:
                 return
 
             if self._is_long_press:
@@ -191,8 +260,9 @@ class HotkeyManager:
         with self._lock:
             k = _norm(key)
             self._keys.discard(k)
+            self._press_times.pop(k, None)
 
-            if not self._hotkey_set:
+            if not self._hotkey_set or self._paused:
                 return
 
             if self._is_long_press:
