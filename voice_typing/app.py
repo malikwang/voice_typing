@@ -15,6 +15,7 @@ from voice_typing.core.config import load_config
 from voice_typing.core.hotkey import HotkeyManager
 from voice_typing.engine.alibaba import AlibabaEngine
 from voice_typing.engine.local import LocalEngine
+from voice_typing.engine.mimo import MimoEngine
 from voice_typing.engine.volcengine import VolcengineEngine
 from voice_typing.ui.styles import DARK_STYLE, OVERLAY_STYLE
 from voice_typing.ui.settings import SettingsWindow
@@ -64,6 +65,10 @@ class VoiceTypingApp(QObject):
             self._engine = VolcengineEngine(
                 app_id=self._config.get("volc_asr_app_id", ""),
                 access_token=self._config.get("volc_asr_access_token", ""),
+            )
+        elif engine_type == "mimo":
+            self._engine = MimoEngine(
+                api_key=self._config.get("mimo_api_key", ""),
             )
         else:
             self._engine = LocalEngine(model_size=self._config.get("local_model", "base"))
@@ -122,6 +127,8 @@ class VoiceTypingApp(QObject):
         engine = self._config.get("engine", "alibaba")
         if engine == "volcengine":
             polished = self._polish_with_doubao(raw_text)
+        elif engine == "mimo":
+            polished = self._polish_with_mimo(raw_text)
         elif engine == "local":
             polished = raw_text
         else:
@@ -221,6 +228,39 @@ class VoiceTypingApp(QObject):
                 return raw_text
         except Exception as e:
             print(f"[Qwen润色] 异常: {e}")
+            return raw_text
+
+    def _polish_with_mimo(self, raw_text):
+        api_key = self._config.get("mimo_api_key", "")
+        if not api_key:
+            print("[MiMo润色] 未配置 API Key，跳过润色")
+            return raw_text
+
+        strength = self._config.get("polish_strength", "medium")
+        system_prompt = self._POLISH_PROMPTS.get(strength, self._POLISH_PROMPTS["medium"])
+        system_prompt += self._build_vocabulary_hint()
+
+        try:
+            from openai import OpenAI
+
+            client = OpenAI(
+                api_key=api_key,
+                base_url="https://api.llm.mioffice.cn/v1",
+            )
+            response = client.chat.completions.create(
+                model="xiaomi/mimo-v2-flash",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": raw_text},
+                ],
+                temperature=0.3,
+                timeout=30,
+            )
+            polished = response.choices[0].message.content.strip()
+            print(f"[MiMo润色] '{raw_text}' → '{polished}'")
+            return polished
+        except Exception as e:
+            print(f"[MiMo润色] 异常: {e}")
             return raw_text
 
     def _polish_with_doubao(self, raw_text):

@@ -7,10 +7,11 @@ CONFIG_DIR = os.path.expanduser("~/.config/voice_typing")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 
 DEFAULT_CONFIG = {
-    "engine": "alibaba",            # "alibaba" | "volcengine" | "local"
+    "engine": "alibaba",            # "alibaba" | "volcengine" | "mimo" | "local"
     "alibaba_api_key": "",          # 阿里云 DashScope API Key（ASR + 润色共用）
     "volc_asr_app_id": "",          # 火山引擎 ASR App ID
     "volc_asr_access_token": "",   # 火山引擎 ASR Access Token
+    "mimo_api_key": "",             # 小米 Mify API Key
     "local_model": "base",
     "hotkey": ["ctrl", "alt", "v"],
     "first_run": True,

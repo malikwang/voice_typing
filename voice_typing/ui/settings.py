@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (
 from voice_typing.core.config import load_config, save_config
 from voice_typing.engine.alibaba import AlibabaEngine
 from voice_typing.engine.local import LocalEngine, download_model
+from voice_typing.engine.mimo import MimoEngine
 from voice_typing.engine.volcengine import VolcengineEngine
 from voice_typing.core.vocabulary import sync_vocabulary
 
@@ -142,6 +143,7 @@ class SettingsWindow(QWidget):
         self._engine_combo = QComboBox()
         self._engine_combo.addItem("阿里云 Paraformer（云端）", "alibaba")
         self._engine_combo.addItem("火山引擎 BigModel（云端）- 开发中", "volcengine")
+        self._engine_combo.addItem("小米 MiMo Realtime（云端）", "mimo")
         self._engine_combo.addItem("faster-whisper（本地）", "local")
         self._engine_combo.currentIndexChanged.connect(self._on_engine_preview)
         elayout.addWidget(self._engine_combo)
@@ -243,6 +245,24 @@ class SettingsWindow(QWidget):
 
         alayout.addWidget(self._volc_api_widget)
         self._volc_api_widget.hide()
+
+        # --- 小米 MiMo API Key 输入 ---
+        self._mimo_api_widget = QWidget()
+        mimo_layout = QVBoxLayout(self._mimo_api_widget)
+        mimo_layout.setContentsMargins(0, 0, 0, 0)
+        mimo_layout.setSpacing(8)
+
+        self._mimo_api_key_input = QLineEdit()
+        self._mimo_api_key_input.setPlaceholderText("输入 Mify API Key（MIFY_API_KEY）")
+        self._mimo_api_key_input.setEchoMode(QLineEdit.Password)
+        mimo_layout.addWidget(self._mimo_api_key_input)
+
+        mimo_hint = QLabel("从 llm.mioffice.cn 获取 API Key")
+        mimo_hint.setObjectName("subtitle")
+        mimo_layout.addWidget(mimo_hint)
+
+        alayout.addWidget(self._mimo_api_widget)
+        self._mimo_api_widget.hide()
 
         self._api_status = QLabel("")
         self._api_status.setObjectName("status")
@@ -415,6 +435,11 @@ class SettingsWindow(QWidget):
                 access_token=self._config.get("volc_asr_access_token", ""),
             )
             engine.initialize()
+        elif engine_type == "mimo":
+            engine = MimoEngine(
+                api_key=self._config.get("mimo_api_key", ""),
+            )
+            engine.initialize()
         else:
             size = self._config.get("local_model", "base")
             engine = LocalEngine(model_size=size)
@@ -445,23 +470,24 @@ class SettingsWindow(QWidget):
         idx2 = sizes.index(local) if local in sizes else 1
         self._model_combo.setCurrentIndex(idx2)
 
+        # MiMo API Key
+        self._mimo_api_key_input.setText(self._config.get("mimo_api_key", ""))
+
         # 引擎初始状态
+        self._local_widget.hide()
+        self._progress_bar.hide()
+        self._alibaba_api_widget.hide()
+        self._volc_api_widget.hide()
+        self._mimo_api_widget.hide()
+
         if engine == "alibaba":
-            self._local_widget.hide()
-            self._progress_bar.hide()
             self._alibaba_api_widget.show()
-            self._volc_api_widget.hide()
         elif engine == "volcengine":
-            self._local_widget.hide()
-            self._progress_bar.hide()
-            self._alibaba_api_widget.hide()
             self._volc_api_widget.show()
+        elif engine == "mimo":
+            self._mimo_api_widget.show()
         else:
             self._local_widget.show()
-            self._progress_bar.hide()
-            self._alibaba_api_widget.hide()
-            self._volc_api_widget.hide()
-            # 检查模型是否已下载
             self._check_model_status()
 
         # 自定义词库
@@ -510,22 +536,21 @@ class SettingsWindow(QWidget):
         """引擎切换预览（不保存）"""
         engine_type = self._engine_combo.currentData()
 
+        self._local_widget.hide()
+        self._progress_bar.hide()
+        self._alibaba_api_widget.hide()
+        self._volc_api_widget.hide()
+        self._mimo_api_widget.hide()
+
         if engine_type == "local":
             self._local_widget.show()
-            self._progress_bar.hide()
-            self._alibaba_api_widget.hide()
-            self._volc_api_widget.hide()
             self._check_model_status()
         elif engine_type == "volcengine":
-            self._local_widget.hide()
-            self._progress_bar.hide()
-            self._alibaba_api_widget.hide()
             self._volc_api_widget.show()
+        elif engine_type == "mimo":
+            self._mimo_api_widget.show()
         else:  # alibaba
-            self._local_widget.hide()
-            self._progress_bar.hide()
             self._alibaba_api_widget.show()
-            self._volc_api_widget.hide()
 
     def _on_apply(self):
         """确定按钮：保存配置并应用"""
@@ -540,6 +565,9 @@ class SettingsWindow(QWidget):
         # 保存火山引擎 ASR 凭证
         self._config["volc_asr_app_id"] = self._volc_app_id_input.text()
         self._config["volc_asr_access_token"] = self._volc_access_token_input.text()
+
+        # 保存 MiMo API Key
+        self._config["mimo_api_key"] = self._mimo_api_key_input.text()
 
         # 保存本地模型
         size_index = self._model_combo.currentIndex()
