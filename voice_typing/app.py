@@ -2,6 +2,7 @@
 """VoiceType — 实时语音转文字桌面应用"""
 
 import os
+import signal
 import sys
 import subprocess
 import threading
@@ -99,6 +100,8 @@ class VoiceTypingApp(QObject):
     @pyqtSlot(str)
     def _on_recording_done(self, text):
         print(f"[DEBUG] _on_recording_done 被调用，文本: '{text}'")
+        # 重置 hotkey 的录音状态（自动停止时 hotkey 不知道录音已结束）
+        self._hotkey._recording = False
         self._overlay.stop_recording()
         if text:
             print("[DEBUG] 文本非空，显示原始文字并启动润色")
@@ -340,9 +343,14 @@ class VoiceTypingApp(QObject):
 
 def main():
     print("[DEBUG] 启动应用...")
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setStyleSheet(DARK_STYLE + OVERLAY_STYLE)
+    # 定时器让 Python 有机会处理信号（如 Ctrl+C）
+    timer = QTimer()
+    timer.timeout.connect(lambda: None)
+    timer.start(200)
     print("[DEBUG] QApplication 已创建")
     voice_app = VoiceTypingApp()
     print("[DEBUG] VoiceTypingApp 已初始化")

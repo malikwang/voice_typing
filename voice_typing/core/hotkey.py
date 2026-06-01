@@ -1,4 +1,4 @@
-"""全局快捷键管理 — 基于 pynput 的 push-to-talk 监听"""
+"""全局快捷键管理 — 基于 pynput 的 toggle 模式监听（按一次开始，再按一次停止）"""
 
 import subprocess
 import threading
@@ -54,11 +54,9 @@ def _str_to_key(s):
 
 
 class HotkeyManager:
-    """全局 push-to-talk 快捷键管理
+    """全局 toggle 快捷键管理
 
-    支持两种模式：
-    - 组合键（多键）：全部按下立即触发录音
-    - 单键长按（一键）：按住超过 1 秒触发录音，松手结束
+    按一次快捷键开始录音，再按一次停止录音。
 
     关键设计：
     - pause/resume 不停止 pynput listener（避免 X11 grab 释放导致窗口焦点丢失），
@@ -67,9 +65,9 @@ class HotkeyManager:
       防止 X11 丢失 key-up 事件导致修饰键永久残留
     """
 
-    LONG_PRESS_SEC = 0.12
     MAX_KEY_HOLD_SEC = 10.0        # 单键最长保持，超时自动清除
     STALE_CHECK_INTERVAL = 3.0     # 卡键检测间隔
+    DEBOUNCE_SEC = 0.3             # 防抖：两次 toggle 之间的最小间隔
 
     def __init__(self, hotkey_list=None):
         self._keys = set()
@@ -80,11 +78,10 @@ class HotkeyManager:
         self._on_start = None
         self._on_stop = None
         self._hotkey_set = frozenset()
-        self._is_long_press = False
-        self._press_time = None
-        self._long_press_timer = None
+        self._is_single_key = False
         self._paused = False
         self._stale_timer_running = False
+        self._last_toggle_time = 0  # 防抖时间戳
 
         if hotkey_list:
             self.set_hotkey(hotkey_list)
@@ -94,7 +91,7 @@ class HotkeyManager:
     def set_hotkey(self, hotkey_list):
         keys = frozenset(_str_to_key(s) for s in hotkey_list)
         self._hotkey_set = keys
-        self._is_long_press = len(hotkey_list) == 1
+        self._is_single_key = len(hotkey_list) == 1
         self._clear_state()
 
     def set_callbacks(self, on_start, on_stop):
@@ -155,6 +152,7 @@ class HotkeyManager:
             self._keys.clear()
             self._press_times.clear()
             self._recording = False
+            self._last_toggle_time = 0
 
     def _start_stale_checker(self):
         self._stop_stale_checker()
@@ -174,9 +172,6 @@ class HotkeyManager:
     def _purge_stale_keys(self):
         now = time.time()
         with self._lock:
-            # 录音中不检测卡键：长按模式下用户会一直按住触发键，属于正常行为
-            if self._recording:
-                return
             stale = [
                 k for k, t in self._press_times.items()
                 if now - t > self.MAX_KEY_HOLD_SEC
@@ -185,50 +180,25 @@ class HotkeyManager:
                 for k in stale:
                     self._keys.discard(k)
                     self._press_times.pop(k, None)
-                if self._is_long_press:
-                    self._on_long_press_release()
-                else:
-                    self._check_combo_stop()
                 self.clear_x11_modifiers()
 
-    # ---- 单键长按模式 ----
+    # ---- toggle 逻辑 ----
 
-    def _on_long_press_start(self):
-        with self._lock:
-            if self._recording or self._paused:
-                return
+    def _toggle(self):
+        """切换录音状态：未录音→开始，录音中→停止"""
+        now = time.time()
+        if now - self._last_toggle_time < self.DEBOUNCE_SEC:
+            return
+        self._last_toggle_time = now
+
+        if not self._recording:
             self._recording = True
             if self._on_start:
                 self._on_start()
-
-    def _on_long_press_release(self):
-        with self._lock:
-            if self._long_press_timer:
-                self._long_press_timer.cancel()
-                self._long_press_timer = None
-            self._press_time = None
-            was_recording = self._recording
+        else:
             self._recording = False
-            if was_recording and self._on_stop:
+            if self._on_stop:
                 self._on_stop()
-
-    # ---- 组合键模式 ----
-
-    def _check_combo_start(self):
-        if self._paused:
-            return
-        if self._hotkey_set and self._hotkey_set.issubset(self._keys):
-            if not self._recording:
-                self._recording = True
-                if self._on_start:
-                    self._on_start()
-
-    def _check_combo_stop(self):
-        if self._hotkey_set and not self._hotkey_set.issubset(self._keys):
-            if self._recording:
-                self._recording = False
-                if self._on_stop:
-                    self._on_stop()
 
     # ---- 事件分发 ----
 
@@ -243,33 +213,18 @@ class HotkeyManager:
             if not self._hotkey_set or self._paused:
                 return
 
-            if self._is_long_press:
-                if k in self._hotkey_set and self._press_time is None:
-                    self._press_time = time.time()
-                    if self.LONG_PRESS_SEC <= 0:
-                        self._on_long_press_start()
-                    else:
-                        self._long_press_timer = threading.Timer(
-                            self.LONG_PRESS_SEC, self._on_long_press_start
-                        )
-                        self._long_press_timer.start()
+            if self._is_single_key:
+                if k in self._hotkey_set:
+                    self._toggle()
             else:
-                self._check_combo_start()
+                if self._hotkey_set.issubset(self._keys):
+                    self._toggle()
 
     def _on_release(self, key):
         with self._lock:
             k = _norm(key)
             self._keys.discard(k)
             self._press_times.pop(k, None)
-
-            if not self._hotkey_set or self._paused:
-                return
-
-            if self._is_long_press:
-                if k in self._hotkey_set:
-                    self._on_long_press_release()
-            else:
-                self._check_combo_stop()
 
     @staticmethod
     def record_key_sequence(on_done):

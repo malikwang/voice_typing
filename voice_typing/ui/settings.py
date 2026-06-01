@@ -267,6 +267,24 @@ class SettingsWindow(QWidget):
 
         scroll_layout.addWidget(hotkey_card)
 
+        # 卡片 3.5: 自动停止
+        autostop_card = QGroupBox("自动停止")
+        autostop_layout = QVBoxLayout(autostop_card)
+
+        autostop_hint = QLabel("说完话后静默多久自动结束录音")
+        autostop_hint.setObjectName("subtitle")
+        autostop_layout.addWidget(autostop_hint)
+
+        self._autostop_combo = QComboBox()
+        self._autostop_combo.addItem("1.5 秒（快速）", 1.5)
+        self._autostop_combo.addItem("2 秒", 2.0)
+        self._autostop_combo.addItem("3 秒（推荐）", 3.0)
+        self._autostop_combo.addItem("5 秒（长思考）", 5.0)
+        self._autostop_combo.addItem("不自动停止（手动按快捷键）", 0)
+        autostop_layout.addWidget(self._autostop_combo)
+
+        scroll_layout.addWidget(autostop_card)
+
         # 卡片 4: 润色强度
         polish_card = QGroupBox("润色强度")
         playout = QVBoxLayout(polish_card)
@@ -468,6 +486,14 @@ class SettingsWindow(QWidget):
         # 开机自动启动
         self._autostart_check.setChecked(self._config.get("autostart", False))
 
+        # 自动停止超时
+        autostop = self._config.get("silence_timeout", 3.0)
+        idx_autostop = self._autostop_combo.findData(autostop)
+        if idx_autostop >= 0:
+            self._autostop_combo.setCurrentIndex(idx_autostop)
+        else:
+            self._autostop_combo.setCurrentIndex(2)  # 默认 3 秒
+
         # 润色强度
         strength = self._config.get("polish_strength", "medium")
         btn = {"light": self._polish_light, "medium": self._polish_medium, "strong": self._polish_strong}.get(strength)
@@ -524,6 +550,9 @@ class SettingsWindow(QWidget):
         autostart = self._autostart_check.isChecked()
         self._config["autostart"] = autostart
         self._set_autostart(autostart)
+
+        # 保存自动停止超时
+        self._config["silence_timeout"] = self._autostop_combo.currentData()
 
         # 保存润色强度
         if self._polish_light.isChecked():
