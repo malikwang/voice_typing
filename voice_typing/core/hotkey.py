@@ -1,4 +1,4 @@
-"""全局快捷键管理 — 基于 pynput 的 toggle 模式监听（按一次开始，再按一次停止）"""
+"""全局快捷键管理 — 基于 pynput 的 hold 模式监听（按住录音，松开停止）"""
 
 import subprocess
 import threading
@@ -54,9 +54,9 @@ def _str_to_key(s):
 
 
 class HotkeyManager:
-    """全局 toggle 快捷键管理
+    """全局 hold 快捷键管理
 
-    按一次快捷键开始录音，再按一次停止录音。
+    按住快捷键开始录音，松开停止录音。
 
     关键设计：
     - pause/resume 不停止 pynput listener（避免 X11 grab 释放导致窗口焦点丢失），
@@ -67,7 +67,8 @@ class HotkeyManager:
 
     MAX_KEY_HOLD_SEC = 10.0        # 单键最长保持，超时自动清除
     STALE_CHECK_INTERVAL = 3.0     # 卡键检测间隔
-    DEBOUNCE_SEC = 0.3             # 防抖：两次 toggle 之间的最小间隔
+    DEBOUNCE_SEC = 0.3             # 防抖：两次触发之间的最小间隔
+    RELEASE_DELAY_SEC = 1.5        # 松开快捷键后延迟停止录音（秒）
 
     def __init__(self, hotkey_list=None):
         self._keys = set()
@@ -82,6 +83,10 @@ class HotkeyManager:
         self._paused = False
         self._stale_timer_running = False
         self._last_toggle_time = 0  # 防抖时间戳
+
+        self._pending_stop = False
+        self._hold_pending = False
+        self._hold_start_time = 0
 
         if hotkey_list:
             self.set_hotkey(hotkey_list)
@@ -182,23 +187,56 @@ class HotkeyManager:
                     self._press_times.pop(k, None)
                 self.clear_x11_modifiers()
 
-    # ---- toggle 逻辑 ----
+    # ---- hold 逻辑 ----
 
-    def _toggle(self):
-        """切换录音状态：未录音→开始，录音中→停止"""
+    MIN_HOLD_SEC = 0.5             # 按住至少这么久才触发录音
+
+    def _start_recording(self):
+        """按下快捷键→延迟判定是否为长按"""
         now = time.time()
         if now - self._last_toggle_time < self.DEBOUNCE_SEC:
             return
+        # 如果正在等待延迟停止，取消它
+        if self._pending_stop:
+            self._pending_stop = False
+            return
+        if self._recording:
+            return
         self._last_toggle_time = now
+        self._hold_start_time = now
+        self._hold_pending = True
+        threading.Thread(target=self._check_hold, daemon=True).start()
 
-        if not self._recording:
+    def _check_hold(self):
+        """等待最短按住时长，确认是长按才开始录音"""
+        time.sleep(self.MIN_HOLD_SEC)
+        with self._lock:
+            if not self._hold_pending:
+                return
+            self._hold_pending = False
+            if self._recording:
+                return
             self._recording = True
-            if self._on_start:
-                self._on_start()
-        else:
+        if self._on_start:
+            self._on_start()
+
+    def _stop_recording(self):
+        """松开快捷键→延迟停止录音（期间再按下可取消停止）"""
+        if not self._recording:
+            return
+        self._pending_stop = True
+        threading.Thread(target=self._delayed_stop, daemon=True).start()
+
+    def _delayed_stop(self):
+        """延迟后执行停止，如果期间重新按住则取消"""
+        time.sleep(self.RELEASE_DELAY_SEC)
+        with self._lock:
+            if not self._pending_stop or not self._recording:
+                return
+            self._pending_stop = False
             self._recording = False
-            if self._on_stop:
-                self._on_stop()
+        if self._on_stop:
+            self._on_stop()
 
     # ---- 事件分发 ----
 
@@ -215,16 +253,28 @@ class HotkeyManager:
 
             if self._is_single_key:
                 if k in self._hotkey_set:
-                    self._toggle()
+                    self._start_recording()
             else:
                 if self._hotkey_set.issubset(self._keys):
-                    self._toggle()
+                    self._start_recording()
 
     def _on_release(self, key):
         with self._lock:
             k = _norm(key)
             self._keys.discard(k)
             self._press_times.pop(k, None)
+
+            if not self._hotkey_set or self._paused:
+                return
+
+            # 松开快捷键中的任意一个键
+            if k in self._hotkey_set:
+                # 按住不够久，取消
+                if self._hold_pending:
+                    self._hold_pending = False
+                    return
+                if self._recording:
+                    self._stop_recording()
 
     @staticmethod
     def record_key_sequence(on_done):

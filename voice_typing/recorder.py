@@ -28,8 +28,6 @@ class Recorder(QObject):
         self._app_obj = app_obj
         self._last_text = ""
         self._last_text_time = 0
-        self._silence_timeout = load_config().get("silence_timeout", 3.0)
-
     def start(self):
         self._p = pyaudio.PyAudio()
         self._recording = True
@@ -48,29 +46,12 @@ class Recorder(QObject):
             self._engine.set_text_callback(self._on_text_update)
 
         threading.Thread(target=self._feed_engine, daemon=True).start()
-        threading.Thread(target=self._silence_watchdog, daemon=True).start()
 
     def stop(self):
         self._recording = False
 
     def _on_text_update(self, text):
-        if text != self._last_text:
-            self._last_text = text
-            self._last_text_time = time.time()
         self.text_update.emit(text)
-
-    def _silence_watchdog(self):
-        """监控静默：有文本产出后，连续 N 秒无新内容则自动停止"""
-        if not self._silence_timeout or self._silence_timeout <= 0:
-            return
-        while self._recording:
-            time.sleep(0.5)
-            if not self._recording:
-                return
-            if self._last_text and time.time() - self._last_text_time >= self._silence_timeout:
-                print(f"[AUTO-STOP] 静默 {self._silence_timeout}s，自动停止录音")
-                self._recording = False
-                return
 
     def _record_audio(self):
         try:
