@@ -16,10 +16,7 @@ from PyQt5.QtWidgets import (
 )
 
 from voice_typing.core.config import load_config, save_config
-from voice_typing.engine.alibaba import AlibabaEngine
-from voice_typing.engine.local import LocalEngine, download_model
-from voice_typing.engine.volcengine import VolcengineEngine
-from voice_typing.core.vocabulary import sync_vocabulary
+from voice_typing.engine.mimo import MimoEngine
 
 
 def _make_tray_icon():
@@ -140,9 +137,10 @@ class SettingsWindow(QWidget):
         elayout = QVBoxLayout(engine_card)
 
         self._engine_combo = QComboBox()
-        self._engine_combo.addItem("阿里云 Paraformer（云端）", "alibaba")
-        self._engine_combo.addItem("火山引擎 BigModel（云端）- 开发中", "volcengine")
-        self._engine_combo.addItem("faster-whisper（本地）", "local")
+        # self._engine_combo.addItem("阿里云 Paraformer（云端）", "alibaba")
+        # self._engine_combo.addItem("火山引擎 BigModel（云端）- 开发中", "volcengine")
+        self._engine_combo.addItem("小米 ASR（云端）", "mimo")
+        # self._engine_combo.addItem("faster-whisper（本地）", "local")
         self._engine_combo.currentIndexChanged.connect(self._on_engine_preview)
         elayout.addWidget(self._engine_combo)
 
@@ -244,6 +242,24 @@ class SettingsWindow(QWidget):
         alayout.addWidget(self._volc_api_widget)
         self._volc_api_widget.hide()
 
+        # --- 小米 MiMo API Key 输入 ---
+        self._mimo_api_widget = QWidget()
+        mimo_layout = QVBoxLayout(self._mimo_api_widget)
+        mimo_layout.setContentsMargins(0, 0, 0, 0)
+        mimo_layout.setSpacing(8)
+
+        self._mimo_api_key_input = QLineEdit()
+        self._mimo_api_key_input.setPlaceholderText("输入 Mify API Key（MIFY_API_KEY）")
+        self._mimo_api_key_input.setEchoMode(QLineEdit.Password)
+        mimo_layout.addWidget(self._mimo_api_key_input)
+
+        mimo_hint = QLabel("从 llm.mioffice.cn 获取 API Key")
+        mimo_hint.setObjectName("subtitle")
+        mimo_layout.addWidget(mimo_hint)
+
+        alayout.addWidget(self._mimo_api_widget)
+        self._mimo_api_widget.hide()
+
         self._api_status = QLabel("")
         self._api_status.setObjectName("status")
         alayout.addWidget(self._api_status)
@@ -267,10 +283,14 @@ class SettingsWindow(QWidget):
 
         scroll_layout.addWidget(hotkey_card)
 
-        # 卡片 4: 润色强度
-        polish_card = QGroupBox("润色强度")
+
+        # 卡片 4: 润色设置
+        polish_card = QGroupBox("文本润色")
         playout = QVBoxLayout(polish_card)
         playout.setSpacing(6)
+
+        self._polish_enabled_cb = QCheckBox("启用文本润色（ASR 识别后调用大模型优化文本）")
+        playout.addWidget(self._polish_enabled_cb)
 
         self._polish_group = QButtonGroup(self)
 
@@ -286,11 +306,13 @@ class SettingsWindow(QWidget):
         playout.addWidget(self._polish_medium)
         playout.addWidget(self._polish_strong)
 
-        polish_hint = QLabel("ASR 识别后调用大模型润色文本的力度（服务商在上方选择）")
-        polish_hint.setObjectName("subtitle")
-        playout.addWidget(polish_hint)
+        self._polish_hint = QLabel("润色强度选择（服务商在上方选择）")
+        self._polish_hint.setObjectName("subtitle")
+        playout.addWidget(self._polish_hint)
 
-        scroll_layout.addWidget(polish_card)
+        self._polish_enabled_cb.toggled.connect(self._on_polish_toggled)
+
+        # scroll_layout.addWidget(polish_card)  # 暂时隐藏润色设置
 
         # 卡片 5: 自定义词库
         vocab_card = QGroupBox("自定义词库")
@@ -325,7 +347,7 @@ class SettingsWindow(QWidget):
         del_vocab_btn.clicked.connect(self._delete_vocabulary)
         vlayout.addWidget(del_vocab_btn)
 
-        scroll_layout.addWidget(vocab_card)
+        # scroll_layout.addWidget(vocab_card)  # 暂时隐藏自定义词库
 
         # 卡片 6: 开机启动
         autostart_card = QGroupBox("开机启动")
@@ -397,6 +419,11 @@ class SettingsWindow(QWidget):
                 access_token=self._config.get("volc_asr_access_token", ""),
             )
             engine.initialize()
+        elif engine_type == "mimo":
+            engine = MimoEngine(
+                api_key=self._config.get("mimo_api_key", ""),
+            )
+            engine.initialize()
         else:
             size = self._config.get("local_model", "base")
             engine = LocalEngine(model_size=size)
@@ -427,52 +454,53 @@ class SettingsWindow(QWidget):
         idx2 = sizes.index(local) if local in sizes else 1
         self._model_combo.setCurrentIndex(idx2)
 
+        # MiMo API Key
+        self._mimo_api_key_input.setText(self._config.get("mimo_api_key", ""))
+
         # 引擎初始状态
+        self._local_widget.hide()
+        self._progress_bar.hide()
+        self._alibaba_api_widget.hide()
+        self._volc_api_widget.hide()
+        self._mimo_api_widget.hide()
+
         if engine == "alibaba":
-            self._local_widget.hide()
-            self._progress_bar.hide()
             self._alibaba_api_widget.show()
-            self._volc_api_widget.hide()
         elif engine == "volcengine":
-            self._local_widget.hide()
-            self._progress_bar.hide()
-            self._alibaba_api_widget.hide()
             self._volc_api_widget.show()
+        elif engine == "mimo":
+            self._mimo_api_widget.show()
         else:
             self._local_widget.show()
-            self._progress_bar.hide()
-            self._alibaba_api_widget.hide()
-            self._volc_api_widget.hide()
-            # 检查模型是否已下载
             self._check_model_status()
 
-        # 自定义词库
-        vocab = self._config.get("custom_vocabulary", [])
-        self._vocab_list.clear()
-
-        # 兼容旧版纯列表格式
-        if isinstance(vocab, dict):
-            vocab = list(vocab.values())
-            self._config["custom_vocabulary"] = vocab
-
-        for item_data in vocab:
-            if isinstance(item_data, dict):
-                term = item_data.get("term", "")
-            else:
-                term = str(item_data)
-
-            list_item = QListWidgetItem(term)
-            list_item.setData(Qt.UserRole, {"term": term})
-            self._vocab_list.addItem(list_item)
+        # # 自定义词库（暂时隐藏）
+        # vocab = self._config.get("custom_vocabulary", [])
+        # self._vocab_list.clear()
+        # if isinstance(vocab, dict):
+        #     vocab = list(vocab.values())
+        #     self._config["custom_vocabulary"] = vocab
+        # for item_data in vocab:
+        #     if isinstance(item_data, dict):
+        #         term = item_data.get("term", "")
+        #     else:
+        #         term = str(item_data)
+        #     list_item = QListWidgetItem(term)
+        #     list_item.setData(Qt.UserRole, {"term": term})
+        #     self._vocab_list.addItem(list_item)
 
         # 开机自动启动
         self._autostart_check.setChecked(self._config.get("autostart", False))
 
-        # 润色强度
-        strength = self._config.get("polish_strength", "medium")
-        btn = {"light": self._polish_light, "medium": self._polish_medium, "strong": self._polish_strong}.get(strength)
-        if btn:
-            btn.setChecked(True)
+
+        # # 润色开关 & 强度（暂时隐藏）
+        # polish_on = self._config.get("polish_enabled", True)
+        # self._polish_enabled_cb.setChecked(polish_on)
+        # self._on_polish_toggled(polish_on)
+        # strength = self._config.get("polish_strength", "medium")
+        # btn = {"light": self._polish_light, "medium": self._polish_medium, "strong": self._polish_strong}.get(strength)
+        # if btn:
+        #     btn.setChecked(True)
 
         # 豆包润色凭证
         self._doubao_api_key_input.setText(self._config.get("doubao_api_key", ""))
@@ -480,26 +508,32 @@ class SettingsWindow(QWidget):
 
     # ---------- 事件处理 ----------
 
+    def _on_polish_toggled(self, checked):
+        """润色开关切换时显示/隐藏强度选项"""
+        self._polish_light.setVisible(checked)
+        self._polish_medium.setVisible(checked)
+        self._polish_strong.setVisible(checked)
+        self._polish_hint.setVisible(checked)
+
     def _on_engine_preview(self, index):
         """引擎切换预览（不保存）"""
         engine_type = self._engine_combo.currentData()
 
-        if engine_type == "local":
-            self._local_widget.show()
-            self._progress_bar.hide()
-            self._alibaba_api_widget.hide()
-            self._volc_api_widget.hide()
-            self._check_model_status()
-        elif engine_type == "volcengine":
-            self._local_widget.hide()
-            self._progress_bar.hide()
-            self._alibaba_api_widget.hide()
-            self._volc_api_widget.show()
-        else:  # alibaba
-            self._local_widget.hide()
-            self._progress_bar.hide()
-            self._alibaba_api_widget.show()
-            self._volc_api_widget.hide()
+        self._local_widget.hide()
+        self._progress_bar.hide()
+        self._alibaba_api_widget.hide()
+        self._volc_api_widget.hide()
+        self._mimo_api_widget.hide()
+
+        if engine_type == "mimo":
+            self._mimo_api_widget.show()
+        # elif engine_type == "local":
+        #     self._local_widget.show()
+        #     self._check_model_status()
+        # elif engine_type == "volcengine":
+        #     self._volc_api_widget.show()
+        # else:  # alibaba
+        #     self._alibaba_api_widget.show()
 
     def _on_apply(self):
         """确定按钮：保存配置并应用"""
@@ -515,6 +549,9 @@ class SettingsWindow(QWidget):
         self._config["volc_asr_app_id"] = self._volc_app_id_input.text()
         self._config["volc_asr_access_token"] = self._volc_access_token_input.text()
 
+        # 保存 MiMo API Key
+        self._config["mimo_api_key"] = self._mimo_api_key_input.text()
+
         # 保存本地模型
         size_index = self._model_combo.currentIndex()
         sizes = ["tiny", "base", "small"]
@@ -525,46 +562,46 @@ class SettingsWindow(QWidget):
         self._config["autostart"] = autostart
         self._set_autostart(autostart)
 
-        # 保存润色强度
-        if self._polish_light.isChecked():
-            self._config["polish_strength"] = "light"
-        elif self._polish_strong.isChecked():
-            self._config["polish_strength"] = "strong"
-        else:
-            self._config["polish_strength"] = "medium"
+
+        # # 保存润色开关 & 强度（暂时隐藏）
+        # self._config["polish_enabled"] = self._polish_enabled_cb.isChecked()
+        # if self._polish_light.isChecked():
+        #     self._config["polish_strength"] = "light"
+        # elif self._polish_strong.isChecked():
+        #     self._config["polish_strength"] = "strong"
+        # else:
+        #     self._config["polish_strength"] = "medium"
 
         # 保存豆包润色凭证
         self._config["doubao_api_key"] = self._doubao_api_key_input.text()
         self._config["doubao_endpoint_id"] = self._doubao_endpoint_input.text()
 
-        # 保存自定义词库
-        vocab = []
-        hotwords = []  # 仅术语列表，用于 Paraformer 热词 API
-        for i in range(self._vocab_list.count()):
-            item = self._vocab_list.item(i)
-            data = item.data(Qt.UserRole)
-            term = data.get("term") if data else item.text()
-            vocab.append({"term": term})
-            hotwords.append(term)
-        self._config["custom_vocabulary"] = vocab
-
-        # 同步热词表到阿里云，获取 phrase_id
-        if engine_type == "alibaba" and hotwords and api_key:
-            self._status_label.setText("正在同步热词表...")
-            QApplication.processEvents()
-            phrase_id = sync_vocabulary(
-                api_key=api_key,
-                hotwords=hotwords,
-                phrase_id=self._config.get("phrase_id", ""),
-            )
-            if phrase_id:
-                self._config["phrase_id"] = phrase_id
-            else:
-                self._status_label.setText("热词同步失败（识别仍可用，热词不生效）")
-                QTimer.singleShot(3000, lambda: self._update_status())
-        elif not vocab:
-            # 热词列表为空，清空 phrase_id
-            self._config["phrase_id"] = ""
+        # # 保存自定义词库（暂时隐藏）
+        # vocab = []
+        # hotwords = []
+        # for i in range(self._vocab_list.count()):
+        #     item = self._vocab_list.item(i)
+        #     data = item.data(Qt.UserRole)
+        #     term = data.get("term") if data else item.text()
+        #     vocab.append({"term": term})
+        #     hotwords.append(term)
+        # self._config["custom_vocabulary"] = vocab
+        #
+        # if engine_type == "alibaba" and hotwords and api_key:
+        #     self._status_label.setText("正在同步热词表...")
+        #     QApplication.processEvents()
+        #     phrase_id = sync_vocabulary(
+        #         api_key=api_key,
+        #         hotwords=hotwords,
+        #         phrase_id=self._config.get("phrase_id", ""),
+        #     )
+        #     if phrase_id:
+        #         self._config["phrase_id"] = phrase_id
+        #     else:
+        #         self._status_label.setText("热词同步失败（识别仍可用，热词不生效）")
+        #         QTimer.singleShot(3000, lambda: self._update_status())
+        # elif not vocab:
+        #     self._config["phrase_id"] = ""
 
         # 保存配置文件
         save_config(self._config)
