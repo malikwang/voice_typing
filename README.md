@@ -1,76 +1,91 @@
 # VoiceType - AI 语音输入工具
 
-Ubuntu 环境下的 AI 语音转文字工具，支持阿里云 Paraformer 和本地 faster-whisper 模型。
+Ubuntu 环境下的实时语音转文字工具，基于小米 ASR_Streaming 模型，支持全局快捷键触发，自动粘贴到光标位置。
 
 ## 功能特性
 
-- 🎤 实时语音输入转文字
-- ⌨️ 自动粘贴到光标位置
-- 🔥 全局快捷键触发（默认 Ctrl+Alt+V）
-- 🌐 支持阿里云 Paraformer（云端）
-- 💻 支持 faster-whisper（本地离线）
-- 🎨 暗黑极简 GUI 界面
-- 📊 实时转写浮窗显示
+- 按住快捷键录音，松开自动停止并粘贴
+- 实时转写浮窗显示（边说边出字）
+- 基于小米 Mify 平台 ASR_Streaming 流式识别
+- 暗黑极简 GUI + 系统托盘
 
 ## 安装
 
-### 方式一：deb 包安装（推荐）
-
-从 [GitHub Releases](https://github.com/hongyan199048/voice_typing/releases) 下载最新版本：
+### 系统依赖
 
 ```bash
-wget https://github.com/hongyan199048/voice_typing/releases/download/v1.0.0/voice-typing_1.0.0_amd64.deb
-sudo dpkg -i voice-typing_1.0.0_amd64.deb
-sudo apt-get install -f  # 如有依赖问题
+sudo apt install portaudio19-dev xclip xdotool
 ```
 
-安装后从应用菜单启动，或命令行运行 `voice-typing`
-
-### 方式二：从源码运行
+### Python 依赖
 
 ```bash
-git clone https://github.com/hongyan199048/voice_typing.git
+git clone https://github.com/malikwang/voice_typing.git
 cd voice_typing
 pip install -r requirements.txt
+```
+
+### 运行
+
+```bash
 python main.py
 ```
 
 ## 使用
 
-首次运行会显示设置窗口：
+1. 首次运行在设置窗口输入小米 Mify API Key
+2. 按住快捷键（默认 Ctrl+Alt+V）开始录音
+3. 松开快捷键，1.5 秒后自动停止并粘贴识别结果
 
-1. **选择引擎**：阿里云（需 API Key）或本地模型
-2. **配置 API**：使用阿里云时，输入 [DashScope API Key](https://dashscope.console.aliyun.com/)
-3. **下载模型**：使用本地模式时，选择模型大小（tiny/base/small）并下载
-4. **设置快捷键**：点击"录制快捷键"，按下组合键
+> 按住不到 0.5 秒不会触发录音，防止误触。
 
-**语音输入**：
-1. 按住快捷键开始录音
-2. 屏幕底部显示实时转写
-3. 松开快捷键，文字自动粘贴到光标位置
+## 快捷键
 
-## 注意事项
+- 默认：`Ctrl+Alt+V`（可在设置中修改）
+- 模式：按住录音，松开停止（hold 模式）
+- 支持单键或组合键
 
-- **本地模型下载**：faster-whisper 模型托管在 Hugging Face，国内访问需要 VPN
-- **推荐方案**：国内用户建议使用阿里云 Paraformer 引擎，无需下载模型，识别速度快
+## API Key 获取
 
-## 故障排查
-
-**快捷键不响应**
-- 检查是否与系统快捷键冲突
-- 尝试更换快捷键组合
-
-**模型下载失败**
-- 确保网络可访问 Hugging Face（可能需要 VPN）
-- 或切换到阿里云引擎
-
-**录音无声音**
-- 检查麦克风权限
-- 运行 `arecord -l` 确认音频设备
+1. 打开 [Mify 平台](https://mify.mioffice.cn/gateway?tab=api-key)
+2. 创建个人 API Key
+3. 在设置窗口粘贴
 
 ## 配置文件
 
-配置保存在 `~/.config/voice_typing/config.json`
+`~/.config/voice_typing/config.json`
+
+```json
+{
+  "engine": "mimo",
+  "mimo_api_key": "sk-xxx",
+  "hotkey": ["ctrl", "alt", "v"]
+}
+```
+
+## 故障排查
+
+**前几秒无法识别**
+- 麦克风增益过高导致削波，应用会自动设为 35%
+- 手动检查：`pactl get-source-volume @DEFAULT_SOURCE@`
+
+**快捷键不响应**
+- 检查是否与系统快捷键冲突
+- 需要 X11 环境（Wayland 可能不兼容）
+
+**录音无声音**
+- `arecord -l` 确认音频设备
+- 确保 PulseAudio 正常运行
+
+## 技术栈
+
+| 组件 | 技术 |
+|------|------|
+| GUI | PyQt5 |
+| 音频采集 | pyaudio (16kHz 16bit mono) |
+| 全局快捷键 | pynput |
+| ASR | 小米 ASR_Streaming (WebSocket) |
+| 粘贴 | xclip + pynput |
 
 ## 许可
 
