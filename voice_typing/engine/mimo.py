@@ -228,5 +228,6 @@ class MimoEngine(BaseEngine):
 
     def stop(self) -> str:
         self._running = False
-        # 直接使用已收到的最后一条中间结果，不等最终结果
+        # 等待最终结果（发送完毕后服务端返回的最后一条）
+        self._ws_done.wait(timeout=10)
         return self._final_text.strip()

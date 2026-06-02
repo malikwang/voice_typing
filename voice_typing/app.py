@@ -13,10 +13,7 @@ from PyQt5.QtWidgets import QApplication
 
 from voice_typing.core.config import load_config
 from voice_typing.core.hotkey import HotkeyManager
-from voice_typing.engine.alibaba import AlibabaEngine
-from voice_typing.engine.local import LocalEngine
 from voice_typing.engine.mimo import MimoEngine
-from voice_typing.engine.volcengine import VolcengineEngine
 from voice_typing.ui.styles import DARK_STYLE, OVERLAY_STYLE
 from voice_typing.ui.settings import SettingsWindow
 from voice_typing.ui.overlay import OverlayWindow
@@ -28,7 +25,6 @@ class VoiceTypingApp(QObject):
 
     recording_start_signal = pyqtSignal()
     recording_stop_signal = pyqtSignal()
-    polish_done = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -40,7 +36,6 @@ class VoiceTypingApp(QObject):
 
         self.recording_start_signal.connect(self._on_recording_start_main_thread)
         self.recording_stop_signal.connect(self._on_recording_stop_main_thread)
-        self.polish_done.connect(self._on_polish_done)
 
         self._hotkey = HotkeyManager(self._config.get("hotkey", ["ctrl", "alt", "v"]))
         self._hotkey.set_callbacks(
@@ -55,23 +50,9 @@ class VoiceTypingApp(QObject):
         self._overlay.show()
 
     def _create_engine(self):
-        engine_type = self._config.get("engine", "alibaba")
-        if engine_type == "alibaba":
-            self._engine = AlibabaEngine(
-                api_key=self._config.get("alibaba_api_key", ""),
-                phrase_id=self._config.get("phrase_id", ""),
-            )
-        elif engine_type == "volcengine":
-            self._engine = VolcengineEngine(
-                app_id=self._config.get("volc_asr_app_id", ""),
-                access_token=self._config.get("volc_asr_access_token", ""),
-            )
-        elif engine_type == "mimo":
-            self._engine = MimoEngine(
-                api_key=self._config.get("mimo_api_key", ""),
-            )
-        else:
-            self._engine = LocalEngine(model_size=self._config.get("local_model", "base"))
+        self._engine = MimoEngine(
+            api_key=self._config.get("mimo_api_key", ""),
+        )
         self._engine.initialize()
 
     def _on_engine_changed(self, engine):
@@ -105,204 +86,17 @@ class VoiceTypingApp(QObject):
     @pyqtSlot(str)
     def _on_recording_done(self, text):
         print(f"[DEBUG] _on_recording_done 被调用，文本: '{text}'")
-        # 重置 hotkey 的录音状态（自动停止时 hotkey 不知道录音已结束）
         self._hotkey._recording = False
         self._overlay.stop_recording()
         if text:
-            if self._config.get("polish_enabled", True):
-                print("[DEBUG] 文本非空，显示原始文字并启动润色")
-                self._overlay.set_text(text)
-                threading.Thread(target=self._run_polish, args=(text,), daemon=True).start()
-            else:
-                print("[DEBUG] 文本非空，润色已关闭，直接粘贴")
-                final = self._apply_alias_map(text)
-                self._overlay.set_text(final)
-                QTimer.singleShot(300, lambda: self._type_text(final))
-                QTimer.singleShot(2500, self._overlay.reset)
+            print(f"[识别结果] {text}")
+            self._overlay.set_text(text)
+            QTimer.singleShot(300, lambda: self._type_text(text))
+            QTimer.singleShot(2500, self._overlay.reset)
         else:
             print("[DEBUG] 文本为空，不执行粘贴")
             self._overlay.reset()
 
-    @pyqtSlot(str)
-    def _on_polish_done(self, polished_text):
-        print("[DEBUG] 润色完成，粘贴最终文字")
-        self._overlay.set_text(polished_text)
-        QTimer.singleShot(300, lambda: self._type_text(polished_text))
-        QTimer.singleShot(2500, self._overlay.reset)
-
-    def _run_polish(self, raw_text):
-        engine = self._config.get("engine", "alibaba")
-        if engine == "volcengine":
-            polished = self._polish_with_doubao(raw_text)
-        elif engine == "mimo":
-            polished = self._polish_with_mimo(raw_text)
-        elif engine == "local":
-            polished = raw_text
-        else:
-            polished = self._polish_with_qwen(raw_text)
-        polished = self._apply_alias_map(polished)
-        self.polish_done.emit(polished)
-
-    def _apply_alias_map(self, text):
-        """将发音别名替换为正确词汇（支持逗号分隔多个别名）"""
-        vocab = self._config.get("custom_vocabulary", [])
-        for item in vocab:
-            if isinstance(item, dict):
-                alias_str = item.get("alias", "")
-                term = item.get("term", "")
-            else:
-                continue
-            if not alias_str or not term:
-                continue
-            for alias in alias_str.split(","):
-                alias = alias.strip()
-                if alias and alias in text:
-                    text = text.replace(alias, term)
-        return text
-
-    _POLISH_PROMPTS = {
-        "light": (
-            "你是文本校对助手。请对以下语音转文字内容做极少量的处理："
-            "1. 仅删除明显的口语语气词（呃、嗯、啊）"
-            "2. 仅补充明显缺失的句号，不要改动其他标点"
-            "3. 严格保留原文的语序、用词、断句方式，一字不改"
-            "直接输出处理后的文字，不加任何解释。"
-        ),
-        "medium": (
-            "你是文本润色助手。请对以下语音转文字内容做最小限度的处理："
-            "1. 删除无意义的语气词（呃、嗯、啊、那个、就是说等）"
-            "2. 修正明显的标点错误，补充必要的逗号和句号"
-            "3. 保留原有语序、用词和表达风格，不要改写句子结构"
-            "4. 不要添加或删减实质性内容"
-            "直接输出处理后的文字，不加任何解释。"
-        ),
-        "strong": (
-            "你是文本润色助手。请对以下语音转文字内容进行适度整理："
-            "1. 删除语气词（呃、嗯、啊、那个、就是说、然后就是等）"
-            "2. 修复重复、卡顿和不连贯的表达，让文字通顺"
-            "3. 修正标点符号"
-            "4. 尽量保持原意和表达风格，只做必要的最小改动"
-            "直接输出处理后的文字，不加任何解释。"
-        ),
-    }
-
-    def _build_vocabulary_hint(self):
-        vocab = self._config.get("custom_vocabulary", [])
-        if not vocab:
-            return ""
-        terms = []
-        for item in vocab:
-            if isinstance(item, dict):
-                terms.append(item.get("term", ""))
-            else:
-                terms.append(str(item))
-        if not terms:
-            return ""
-        term_list = "、".join(terms)
-        return (
-            "另外，以下专业词汇可能在语音识别中被转写为发音相近的错词，"
-            f"请根据上下文将发音相似的词修正为这些正确词汇：{term_list}。"
-        )
-
-    def _polish_with_qwen(self, raw_text):
-        api_key = self._config.get("alibaba_api_key", "")
-        if not api_key:
-            return raw_text
-
-        strength = self._config.get("polish_strength", "medium")
-        system_prompt = self._POLISH_PROMPTS.get(strength, self._POLISH_PROMPTS["medium"])
-        system_prompt += self._build_vocabulary_hint()
-
-        try:
-            from dashscope import Generation
-            import dashscope
-
-            dashscope.api_key = api_key
-            response = Generation.call(
-                model="qwen-plus",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": raw_text},
-                ],
-                result_format="message",
-            )
-            if response.status_code == 200:
-                polished = response.output.choices[0].message.content.strip()
-                print(f"[Qwen润色] '{raw_text}' → '{polished}'")
-                return polished
-            else:
-                print(f"[Qwen润色] API 失败: {response.code} {response.message}")
-                return raw_text
-        except Exception as e:
-            print(f"[Qwen润色] 异常: {e}")
-            return raw_text
-
-    def _polish_with_mimo(self, raw_text):
-        api_key = self._config.get("mimo_api_key", "")
-        if not api_key:
-            print("[MiMo润色] 未配置 API Key，跳过润色")
-            return raw_text
-
-        strength = self._config.get("polish_strength", "medium")
-        system_prompt = self._POLISH_PROMPTS.get(strength, self._POLISH_PROMPTS["medium"])
-        system_prompt += self._build_vocabulary_hint()
-
-        try:
-            from openai import OpenAI
-
-            client = OpenAI(
-                api_key=api_key,
-                base_url="https://api.llm.mioffice.cn/v1",
-            )
-            response = client.chat.completions.create(
-                model="xiaomi/mimo-v2-flash",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": raw_text},
-                ],
-                temperature=0.3,
-                timeout=30,
-            )
-            polished = response.choices[0].message.content.strip()
-            print(f"[MiMo润色] '{raw_text}' → '{polished}'")
-            return polished
-        except Exception as e:
-            print(f"[MiMo润色] 异常: {e}")
-            return raw_text
-
-    def _polish_with_doubao(self, raw_text):
-        api_key = self._config.get("doubao_api_key", "")
-        endpoint_id = self._config.get("doubao_endpoint_id", "")
-        if not api_key or not endpoint_id:
-            print("[Doubao润色] 未配置 API Key 或 Endpoint ID，跳过润色")
-            return raw_text
-
-        strength = self._config.get("polish_strength", "medium")
-        system_prompt = self._POLISH_PROMPTS.get(strength, self._POLISH_PROMPTS["medium"])
-        system_prompt += self._build_vocabulary_hint()
-
-        try:
-            from openai import OpenAI
-
-            client = OpenAI(
-                api_key=api_key,
-                base_url="https://ark.cn-beijing.volces.com/api/v3",
-            )
-            response = client.chat.completions.create(
-                model=endpoint_id,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": raw_text},
-                ],
-                temperature=0.3,
-                timeout=30,
-            )
-            polished = response.choices[0].message.content.strip()
-            print(f"[Doubao润色] '{raw_text}' → '{polished}'")
-            return polished
-        except Exception as e:
-            print(f"[Doubao润色] 异常: {e}")
-            return raw_text
 
     _TERMINAL_CLASSES = [
         "gnome-terminal", "kitty", "alacritty", "xfce4-terminal",

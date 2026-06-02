@@ -1,6 +1,7 @@
 """录音 + ASR 控制器"""
 
 import queue
+import struct
 import subprocess
 import threading
 import time
@@ -59,8 +60,11 @@ class Recorder(QObject):
         try:
             subprocess.run(["pactl", "set-source-volume", "@DEFAULT_SOURCE@", "35%"],
                           timeout=2, capture_output=True)
-        except Exception:
-            pass
+            result = subprocess.run(["pactl", "get-source-volume", "@DEFAULT_SOURCE@"],
+                                    timeout=2, capture_output=True, text=True)
+            print(f"[录音] 麦克风增益: {result.stdout.strip()}", flush=True)
+        except Exception as e:
+            print(f"[录音] 设置增益失败: {e}", flush=True)
 
         try:
             stream = self._p.open(
@@ -84,6 +88,11 @@ class Recorder(QObject):
                 chunk_count += 1
                 if chunk_count == 1:
                     print(f"[录音] 第一个音频块已入队", flush=True)
+                # 每秒打印一次 RMS 音量（前 5 秒）
+                if chunk_count <= 25 and chunk_count % 5 == 1:
+                    samples = struct.unpack(f'<{len(data)//2}h', data)
+                    rms = int((sum(s*s for s in samples) / len(samples)) ** 0.5)
+                    print(f"[录音] chunk={chunk_count} RMS={rms}", flush=True)
             except Exception as e:
                 print(f"[录音] 读取异常: {e}", flush=True)
                 break

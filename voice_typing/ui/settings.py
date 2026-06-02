@@ -16,11 +16,7 @@ from PyQt5.QtWidgets import (
 )
 
 from voice_typing.core.config import load_config, save_config
-from voice_typing.engine.alibaba import AlibabaEngine
-from voice_typing.engine.local import LocalEngine, download_model
 from voice_typing.engine.mimo import MimoEngine
-from voice_typing.engine.volcengine import VolcengineEngine
-from voice_typing.core.vocabulary import sync_vocabulary
 
 
 def _make_tray_icon():
