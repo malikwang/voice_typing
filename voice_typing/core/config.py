@@ -17,6 +17,7 @@ DEFAULT_CONFIG = {
     "first_run": True,
     "custom_vocabulary": [],        # 自定义热词列表：["CUDA", "GitHub", "Python"]
     "phrase_id": "",                # 阿里云热词表ID（UUID，由VocabularyService创建）
+    "polish_enabled": True,         # 润色开关
     "polish_strength": "medium",    # 润色强度：light / medium / strong
     "doubao_api_key": "",           # 豆包 ARK API Key
     "doubao_endpoint_id": "",       # 豆包推理接入点 ID（ep-xxxxxxxxxxxx）

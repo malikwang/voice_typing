@@ -305,10 +305,13 @@ class SettingsWindow(QWidget):
 
         scroll_layout.addWidget(autostop_card)
 
-        # 卡片 4: 润色强度
-        polish_card = QGroupBox("润色强度")
+        # 卡片 4: 润色设置
+        polish_card = QGroupBox("文本润色")
         playout = QVBoxLayout(polish_card)
         playout.setSpacing(6)
+
+        self._polish_enabled_cb = QCheckBox("启用文本润色（ASR 识别后调用大模型优化文本）")
+        playout.addWidget(self._polish_enabled_cb)
 
         self._polish_group = QButtonGroup(self)
 
@@ -324,9 +327,11 @@ class SettingsWindow(QWidget):
         playout.addWidget(self._polish_medium)
         playout.addWidget(self._polish_strong)
 
-        polish_hint = QLabel("ASR 识别后调用大模型润色文本的力度（服务商在上方选择）")
-        polish_hint.setObjectName("subtitle")
-        playout.addWidget(polish_hint)
+        self._polish_hint = QLabel("润色强度选择（服务商在上方选择）")
+        self._polish_hint.setObjectName("subtitle")
+        playout.addWidget(self._polish_hint)
+
+        self._polish_enabled_cb.toggled.connect(self._on_polish_toggled)
 
         scroll_layout.addWidget(polish_card)
 
@@ -520,7 +525,11 @@ class SettingsWindow(QWidget):
         else:
             self._autostop_combo.setCurrentIndex(2)  # 默认 3 秒
 
-        # 润色强度
+        # 润色开关 & 强度
+        polish_on = self._config.get("polish_enabled", True)
+        self._polish_enabled_cb.setChecked(polish_on)
+        self._on_polish_toggled(polish_on)
+
         strength = self._config.get("polish_strength", "medium")
         btn = {"light": self._polish_light, "medium": self._polish_medium, "strong": self._polish_strong}.get(strength)
         if btn:
@@ -531,6 +540,13 @@ class SettingsWindow(QWidget):
         self._doubao_endpoint_input.setText(self._config.get("doubao_endpoint_id", ""))
 
     # ---------- 事件处理 ----------
+
+    def _on_polish_toggled(self, checked):
+        """润色开关切换时显示/隐藏强度选项"""
+        self._polish_light.setVisible(checked)
+        self._polish_medium.setVisible(checked)
+        self._polish_strong.setVisible(checked)
+        self._polish_hint.setVisible(checked)
 
     def _on_engine_preview(self, index):
         """引擎切换预览（不保存）"""
@@ -582,7 +598,8 @@ class SettingsWindow(QWidget):
         # 保存自动停止超时
         self._config["silence_timeout"] = self._autostop_combo.currentData()
 
-        # 保存润色强度
+        # 保存润色开关 & 强度
+        self._config["polish_enabled"] = self._polish_enabled_cb.isChecked()
         if self._polish_light.isChecked():
             self._config["polish_strength"] = "light"
         elif self._polish_strong.isChecked():

@@ -109,9 +109,16 @@ class VoiceTypingApp(QObject):
         self._hotkey._recording = False
         self._overlay.stop_recording()
         if text:
-            print("[DEBUG] 文本非空，显示原始文字并启动润色")
-            self._overlay.set_text(text)
-            threading.Thread(target=self._run_polish, args=(text,), daemon=True).start()
+            if self._config.get("polish_enabled", True):
+                print("[DEBUG] 文本非空，显示原始文字并启动润色")
+                self._overlay.set_text(text)
+                threading.Thread(target=self._run_polish, args=(text,), daemon=True).start()
+            else:
+                print("[DEBUG] 文本非空，润色已关闭，直接粘贴")
+                final = self._apply_alias_map(text)
+                self._overlay.set_text(final)
+                QTimer.singleShot(300, lambda: self._type_text(final))
+                QTimer.singleShot(2500, self._overlay.reset)
         else:
             print("[DEBUG] 文本为空，不执行粘贴")
             self._overlay.reset()
