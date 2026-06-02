@@ -1,6 +1,7 @@
 """录音 + ASR 控制器"""
 
 import queue
+import subprocess
 import threading
 import time
 
@@ -54,6 +55,13 @@ class Recorder(QObject):
         self.text_update.emit(text)
 
     def _record_audio(self):
+        # 设置麦克风增益为 35%，防止削波导致 ASR 无法识别
+        try:
+            subprocess.run(["pactl", "set-source-volume", "@DEFAULT_SOURCE@", "35%"],
+                          timeout=2, capture_output=True)
+        except Exception:
+            pass
+
         try:
             stream = self._p.open(
                 format=pyaudio.paInt16,
